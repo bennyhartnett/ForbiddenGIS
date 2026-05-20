@@ -1007,6 +1007,11 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           onStreetView={openMapCenterStreetView}
         />
 
+        <MapLegend
+          presentFeatureKinds={presentFeatureKinds}
+          featureColors={effectiveFeatureColors}
+        />
+
         {gibsActive ? (
           <TimeDock
             value={gibsDate}
@@ -1784,6 +1789,58 @@ function MapControls(props: {
         </button>
       </div>
     </nav>
+  );
+}
+
+/* ---------------- MapLegend ---------------- */
+
+function MapLegend(props: {
+  presentFeatureKinds: ReadonlySet<FeatureKind>;
+  featureColors: Record<FeatureKind, string>;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const items = useMemo(
+    () => FEATURE_KINDS.filter((meta) => props.presentFeatureKinds.has(meta.kind)),
+    [props.presentFeatureKinds],
+  );
+
+  if (items.length === 0) return null;
+
+  return (
+    <div
+      className={`map-legend ${expanded ? "expanded" : "collapsed"}`}
+      role="group"
+      aria-label="Map legend"
+    >
+      <button
+        type="button"
+        className="map-legend-header"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        title={expanded ? "Collapse legend" : "Expand legend"}
+      >
+        <span className="map-legend-title">Legend</span>
+        <span className="map-legend-count">{items.length}</span>
+      </button>
+      {expanded ? (
+        <ul className="map-legend-list">
+          {items.map((meta) => (
+            <li
+              key={meta.kind}
+              className={`map-legend-item ${meta.group === "context" ? "is-context" : ""}`}
+              title={meta.label}
+            >
+              <span
+                className="map-legend-swatch"
+                style={{ background: props.featureColors[meta.kind] }}
+                aria-hidden="true"
+              />
+              <span className="map-legend-label">{meta.label}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 

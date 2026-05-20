@@ -35,7 +35,12 @@ export interface OverpassQueryResult {
   geojson: GeoJSONFeatureCollection;
 }
 
-const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+];
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 const TAG_KEY_PATTERN = /^[A-Za-z0-9_:-]+$/;
 const DISALLOWED_VALUE_PATTERN = /[\[\]\{\}\(\);"'<>\n\r]/;
 
@@ -107,30 +112,76 @@ export async function runOverpassQuery(
   query: string,
   signal?: AbortSignal,
 ): Promise<OverpassQueryResult> {
-  const response = await fetch(OVERPASS_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-    },
-    body: new URLSearchParams({ data: query }),
-    signal,
-  });
+  let lastError: Error | null = null;
 
-  if (!response.ok) {
-    const message = await response.text().catch(() => "");
-    throw new Error(
-      `Overpass request failed (${response.status}). ${message.slice(0, 180)}`.trim(),
-    );
+  for (let attempt = 0; attempt < OVERPASS_ENDPOINTS.length; attempt += 1) {
+    const endpoint = OVERPASS_ENDPOINTS[attempt];
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        },
+        body: new URLSearchParams({ data: query }),
+        signal,
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        if (RETRYABLE_STATUSES.has(response.status) && attempt < OVERPASS_ENDPOINTS.length - 1) {
+          lastError = new Error(friendlyOverpassError(response.status, body));
+          continue;
+        }
+        throw new Error(friendlyOverpassError(response.status, body));
+      }
+
+      const data = (await response.json()) as OverpassResponse;
+      const geojson = overpassToGeoJSON(data);
+
+      return {
+        response: data,
+        rawFeatureCount: data.elements?.length ?? 0,
+        geojson,
+      };
+    } catch (error) {
+      if ((error as Error).name === "AbortError") throw error;
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt >= OVERPASS_ENDPOINTS.length - 1) break;
+    }
   }
 
-  const data = (await response.json()) as OverpassResponse;
-  const geojson = overpassToGeoJSON(data);
+  throw lastError ?? new Error("Overpass request failed.");
+}
 
-  return {
-    response: data,
-    rawFeatureCount: data.elements?.length ?? 0,
-    geojson,
-  };
+function friendlyOverpassError(status: number, body: string): string {
+  if (status === 504 || status === 502) {
+    return "Overpass gateway timed out (504). The public Overpass API is overloaded — try a smaller area, zoom in, or try again in a moment.";
+  }
+  if (status === 503) {
+    return "Overpass server is busy (503). Try again in a moment or zoom in to shrink the query.";
+  }
+  if (status === 429) {
+    return "Overpass rate limit hit (429). Wait a moment before retrying.";
+  }
+  if (status === 400) {
+    const snippet = stripHtml(body).slice(0, 240).trim();
+    return snippet
+      ? `Overpass rejected the query (400). ${snippet}`
+      : "Overpass rejected the query (400). Check your raw Overpass QL for syntax errors.";
+  }
+  const snippet = stripHtml(body).slice(0, 200).trim();
+  return snippet
+    ? `Overpass request failed (${status}). ${snippet}`
+    : `Overpass request failed (${status}).`;
+}
+
+function stripHtml(input: string): string {
+  return input
+    .replace(/<!DOCTYPE[^>]*>/gi, "")
+    .replace(/<\?xml[^?]*\?>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function overpassToGeoJSON(
