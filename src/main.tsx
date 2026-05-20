@@ -8,3 +8,8 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
+
+requestAnimationFrame(() => {
+  const favicon = document.getElementById("favicon") as HTMLLinkElement | null;
+  if (favicon) favicon.href = "/favicon.svg";
+});

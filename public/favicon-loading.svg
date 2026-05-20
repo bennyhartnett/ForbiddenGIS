@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <circle cx="32" cy="32" r="28" fill="#1e88e5"/>
+  <g fill="#43a047">
+    <path d="M14 24c4-2 9-1 11 2s-2 7-6 7-9-6-5-9z"/>
+    <path d="M38 18c3 0 7 3 6 6s-5 2-7 0-2-6 1-6z"/>
+    <path d="M40 36c5-1 11 2 11 7s-8 8-12 5-4-11 1-12z"/>
+    <path d="M22 44c3 1 6 5 4 8s-7 1-8-2 1-7 4-6z"/>
+  </g>
+  <g fill="none" stroke="#0d47a1" stroke-width="2">
+    <circle cx="32" cy="32" r="28"/>
+    <ellipse cx="32" cy="32" rx="28" ry="10"/>
+    <line x1="4" y1="32" x2="60" y2="32"/>
+    <ellipse cx="32" cy="32" rx="14" ry="28"/>
+    <ellipse cx="32" cy="32" rx="0" ry="28">
+      <animate attributeName="rx" values="0;28;0" dur="2s" repeatCount="indefinite"/>
+    </ellipse>
+  </g>
+</svg>
