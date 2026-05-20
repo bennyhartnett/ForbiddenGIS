@@ -44,6 +44,7 @@ export const PRESETS: PresetDefinition[] = [
   preset("preset-32", "Named trails that cross roads", "Named walking/hiking trails that cross or meet roads.", 14, true, false, false),
   preset("preset-33", "Industrial dead ends", "Dead ends and service roads in or near industrial landuse.", 14, true, false, false),
   preset("preset-34", "Roads with low speed + tree-lined + no buildings nearby", "Low-speed tree-lined roads with no mapped buildings nearby.", 14, true, true, false),
+  preset("preset-35", "Train tracks without fence", "Railway tracks (rail, light rail, narrow gauge, tram, monorail, subway) with no mapped fence or wall within 30 m.", 14, true, false, false),
 ];
 
 export function getPresetById(id: PresetId): PresetDefinition {
@@ -185,6 +186,8 @@ function presetClauses(
       return [...deadEndClauses(boxes.bbox), ...quietRoadClauses(boxes.bbox), ...industrialClauses(boxes.bbox100m)];
     case "preset-34":
       return [...lowSpeedClauses(boxes.bbox), `way["highway"]["tree_lined"](${boxes.bbox});`, ...treeClauses(boxes.bbox60m), ...woodsClauses(boxes.bbox60m), ...buildingClauses(boxes.bbox100ft)];
+    case "preset-35":
+      return [...railwayClauses(boxes.bbox), ...fenceClauses(boxes.bbox60m)];
   }
 }
 
@@ -369,6 +372,20 @@ function noSidewalkRoadClauses(bbox: string): string[] {
 
 function industrialClauses(bbox: string): string[] {
   return [`nwr["landuse"="industrial"](${bbox});`];
+}
+
+function railwayClauses(bbox: string): string[] {
+  return [
+    `way["railway"~"^(rail|light_rail|narrow_gauge|tram|subway|monorail|preserved)$"](${bbox});`,
+    `relation["railway"~"^(rail|light_rail|narrow_gauge|tram|subway|monorail|preserved)$"](${bbox});`,
+  ];
+}
+
+function fenceClauses(bbox: string): string[] {
+  return [
+    `way["barrier"~"^(fence|wall|hedge|railing|chain_link_fence|guard_rail|retaining_wall)$"](${bbox});`,
+    `node["barrier"~"^(fence|wall|hedge|railing|chain_link_fence|guard_rail|retaining_wall)$"](${bbox});`,
+  ];
 }
 
 function dedupeClauses(clauses: string[]): string[] {

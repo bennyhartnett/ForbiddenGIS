@@ -39,6 +39,7 @@ export interface SpatialFilterOptions {
 }
 
 export const NO_BUILDINGS_DISTANCE_METERS = 30.48;
+export const NO_FENCE_DISTANCE_METERS = 30;
 export const NEAR_WATER_DISTANCE_METERS = 30;
 export const WATER_ADJACENT_DISTANCE_METERS = 50;
 export const NEAR_WOODS_DISTANCE_METERS = 50;
@@ -121,6 +122,24 @@ const BARRIER_VALUES = new Set([
   "lift_gate",
   "swing_gate",
   "cattle_grid",
+]);
+const FENCE_BARRIER_VALUES = new Set([
+  "fence",
+  "wall",
+  "hedge",
+  "railing",
+  "chain_link_fence",
+  "guard_rail",
+  "retaining_wall",
+]);
+const RAILWAY_TRACK_VALUES = new Set([
+  "rail",
+  "light_rail",
+  "narrow_gauge",
+  "tram",
+  "subway",
+  "monorail",
+  "preserved",
 ]);
 const STREET_PARKING_KEYS = [
   "parking:left",
@@ -852,6 +871,25 @@ export function applyPresetSpatialFilters(
       }
       break;
     }
+
+    case "preset-35": {
+      const fences = features.filter(isFenceFeature);
+      const railways = features.filter(isRailwayFeature);
+      const farFromFences = farFromAnyPredicate(fences, NO_FENCE_DISTANCE_METERS);
+      for (const railway of railways) {
+        const tags = getFeatureTags(railway);
+        applyClippedResult(railway, farFromFences, (matched, lengthMeters, spans) => {
+          addResult(
+            matched,
+            "railway",
+            "Train track with no mapped fence nearby",
+            undefined,
+            `${describeClip(lengthMeters, spans)} (>= ${formatMeters(NO_FENCE_DISTANCE_METERS)} from any fence/wall). ${tagDetail(tags, ["railway", "name", "operator", "usage", "service", "electrified", "gauge"])}`,
+          );
+        });
+      }
+      break;
+    }
   }
 
   if (options.includeWater) {
@@ -1001,6 +1039,16 @@ export function isIndustrialFeature(feature: GeoJSONFeature): boolean {
   return tags.landuse === "industrial" || Boolean(tags.industrial);
 }
 
+export function isRailwayFeature(feature: GeoJSONFeature): boolean {
+  const tags = getFeatureTags(feature);
+  return RAILWAY_TRACK_VALUES.has(tags.railway ?? "");
+}
+
+export function isFenceFeature(feature: GeoJSONFeature): boolean {
+  const tags = getFeatureTags(feature);
+  return FENCE_BARRIER_VALUES.has(tags.barrier ?? "") || Boolean(tags.fence_type);
+}
+
 export function isNamedTrailFeature(feature: GeoJSONFeature): boolean {
   const tags = getFeatureTags(feature);
   return Boolean(tags.name) && (isTrailOrPath(feature) || tags.route === "hiking" || tags.route === "foot");
@@ -1102,6 +1150,7 @@ function dedupeFeatures(features: GeoJSONFeature[]): GeoJSONFeature[] {
 }
 
 function categoryForFeature(feature: GeoJSONFeature): ScoutCategory {
+  if (isRailwayFeature(feature)) return "railway";
   if (isBarrierOrGateFeature(feature)) return "barrier";
   if (isFordFeature(feature)) return "water-crossing";
   if (isBridgeOrCulvert(feature)) return "bridge";

@@ -17,6 +17,7 @@ export type FeatureKind =
   | "pull-off"
   | "barrier"
   | "industrial"
+  | "railway"
   | "simple"
   | "context-road"
   | "context-parking"
@@ -54,6 +55,7 @@ export const FEATURE_KINDS: FeatureKindMeta[] = [
   { kind: "pull-off", label: "Pull-offs / rest areas", group: "result" },
   { kind: "barrier", label: "Barriers / gates", group: "result" },
   { kind: "industrial", label: "Industrial", group: "result" },
+  { kind: "railway", label: "Railways / train tracks", group: "result" },
   { kind: "simple", label: "Other matches", group: "result" },
   { kind: "context-road", label: "Roads (context)", group: "context" },
   { kind: "context-parking", label: "Parking (context)", group: "context" },
@@ -95,6 +97,7 @@ export const DEFAULT_FEATURE_COLORS: Record<FeatureKind, string> = {
   "pull-off": DEFAULT_ORANGE,
   barrier: DEFAULT_ORANGE,
   industrial: DEFAULT_ORANGE,
+  railway: DEFAULT_ORANGE,
   simple: DEFAULT_ORANGE,
   "context-road": "#5f6368",
   "context-parking": "#8430ce",
@@ -195,6 +198,8 @@ export function featureKindFor(
       return "barrier";
     case "industrial":
       return "industrial";
+    case "railway":
+      return "railway";
     case "simple":
     default:
       return "simple";
