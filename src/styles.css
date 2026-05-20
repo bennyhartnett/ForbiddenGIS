@@ -935,6 +935,88 @@ p {
 .swatch.theme-aubergine { background: linear-gradient(160deg, #283d6a 0%, #1a3646 100%); color: #f3d19c; }
 .swatch.theme-night { background: linear-gradient(160deg, #1a3646 0%, #0e1626 100%); color: #d59563; }
 
+.feature-color-list {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.feature-color-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 4px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.feature-color-row:hover {
+  background: var(--hover, var(--surface-2));
+}
+
+.feature-color-row input[type="color"] {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.feature-color-row input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.feature-color-row input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
+.feature-color-label {
+  display: grid;
+  gap: 1px;
+  line-height: 1.2;
+}
+
+.feature-color-label small {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.feature-color-reset {
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--primary);
+  border-radius: 6px;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.feature-color-reset:hover {
+  background: var(--primary-soft);
+}
+
+.feature-color-reset-all {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-soft);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  justify-self: start;
+}
+
+.feature-color-reset-all:hover {
+  background: var(--surface-2);
+}
+
 /* ---- Map controls (bottom-right) ---- */
 
 .map-controls {
