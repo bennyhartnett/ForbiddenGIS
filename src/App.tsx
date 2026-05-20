@@ -37,8 +37,10 @@ import {
   applyPresetSpatialFilters,
   prepareSimpleResult,
 } from "./lib/spatialFilters";
+import { MAP_THEMES, type ThemeId } from "./lib/mapThemes";
+import { OVERLAY_SOURCES, type OverlayId } from "./lib/overlays";
 
-type Mode = "simple" | "preset" | "raw";
+type Mode = "preset" | "simple" | "raw";
 type MapDisplayType = "roadmap" | "satellite" | "hybrid" | "terrain";
 type DifficultyLevel = "blocked" | "low" | "moderate" | "high" | "very-high";
 
@@ -63,6 +65,54 @@ type StreetViewState =
   | { status: "none"; sourceName: string; message: string }
   | { status: "error"; sourceName: string; message: string };
 
+interface PresetCategory {
+  id: string;
+  label: string;
+  match: (preset: PresetDefinition) => boolean;
+}
+
+const PRESET_CATEGORIES: PresetCategory[] = [
+  { id: "all", label: "All", match: () => true },
+  {
+    id: "off-road",
+    label: "Off-road",
+    match: (preset) =>
+      /off-road|rough|unpaved|high-clearance/i.test(preset.name) ||
+      preset.id === "preset-15" ||
+      preset.id === "preset-16",
+  },
+  {
+    id: "parking",
+    label: "Parking",
+    match: (preset) => /parking|pull-off|layby/i.test(preset.name),
+  },
+  {
+    id: "water",
+    label: "Water",
+    match: (preset) => /water|ford|bridge/i.test(preset.name),
+  },
+  {
+    id: "dead-end",
+    label: "Dead ends",
+    match: (preset) => /dead end|cul de sac|cut-through|industrial dead/i.test(preset.name),
+  },
+  {
+    id: "quiet",
+    label: "Quiet roads",
+    match: (preset) => /25 mile|low-speed|unlit|no-sidewalk|tree-lined/i.test(preset.name),
+  },
+  {
+    id: "trails",
+    label: "Trails",
+    match: (preset) => /trail|walking|pedestrian|cut-through/i.test(preset.name),
+  },
+  {
+    id: "barriers",
+    label: "Barriers",
+    match: (preset) => /barrier|gated/i.test(preset.name),
+  },
+];
+
 const SIMPLE_PRESETS = [
   { label: "Restaurants", filter: "amenity=restaurant" },
   { label: "Cafes", filter: "amenity=cafe" },
@@ -70,7 +120,6 @@ const SIMPLE_PRESETS = [
   { label: "Hotels", filter: "tourism=hotel" },
   { label: "Gas stations", filter: "amenity=fuel" },
   { label: "Shops", filter: "shop=*" },
-  { label: "Buildings", filter: "building=*" },
 ];
 
 const RENDER_LIMIT = 5000;
@@ -81,11 +130,12 @@ const DEFAULT_RAW_QUERY = `[out:json][timeout:25];
 (
   node["amenity"="restaurant"]({{bbox}});
   way["amenity"="restaurant"]({{bbox}});
-  relation["amenity"="restaurant"]({{bbox}});
 );
 out body;
 >;
 out skel qt;`;
+
+const GIBS_MIN_DATE = "2000-02-24";
 
 export default function App() {
   const apiKey = getGoogleMapsApiKey();
@@ -107,30 +157,51 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
   const autocompleteServiceRef = useRef<google.maps.places.AutocompleteService | null>(null);
   const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
+  const overlayMapTypeRef = useRef<google.maps.MapType | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const lastRequestKeyRef = useRef<string | null>(null);
   const selectedDataFeatureRef = useRef<google.maps.Data.Feature | null>(null);
   const dataFeatureClickRef = useRef<(feature: google.maps.Data.Feature) => void>(() => undefined);
   const streetViewLookupIdRef = useRef(0);
   const searchGateRef = useRef({
-    mode: "simple" as Mode,
+    mode: "preset" as Mode,
     tagFilter: "amenity=restaurant",
     presetMinZoom: 14,
   });
+  const lastSearchCenterRef = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
 
-  const [mode, setMode] = useState<Mode>("simple");
+  // Search state
+  const [mode, setMode] = useState<Mode>("preset");
   const [tagFilter, setTagFilter] = useState("amenity=restaurant");
   const [rawQuery, setRawQuery] = useState(DEFAULT_RAW_QUERY);
-  const [locationQuery, setLocationQuery] = useState(DEFAULT_LOCATION_QUERY);
-  const [locationStatus, setLocationStatus] = useState("Scoped to Washington, DC.");
-  const [placeSuggestions, setPlaceSuggestions] = useState<PlaceSuggestion[]>([]);
-  const [suggestionsStatus, setSuggestionsStatus] = useState<string | null>(null);
   const [presetId, setPresetId] = useState<PresetId>("preset-01");
+  const [presetSearch, setPresetSearch] = useState("");
+  const [presetCategory, setPresetCategory] = useState<string>("all");
   const [showBuildings, setShowBuildings] = useState(false);
   const [showWater, setShowWater] = useState(true);
+  const [bufferScale, setBufferScale] = useState(1);
+
+  // Location
+  const [locationQuery, setLocationQuery] = useState(DEFAULT_LOCATION_QUERY);
+  const [placeSuggestions, setPlaceSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [suggestionsStatus, setSuggestionsStatus] = useState<string | null>(null);
+
+  // Map view state
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [mapType, setMapType] = useState<MapDisplayType>("roadmap");
+  const [mapTheme, setMapTheme] = useState<ThemeId>("default");
+  const [tiltOn, setTiltOn] = useState(false);
+  const [overlayId, setOverlayId] = useState<OverlayId>("none");
+  const [overlayOpacity, setOverlayOpacity] = useState(0.8);
+  const [gibsDate, setGibsDate] = useState<string>(() => formatGibsDate(new Date()));
   const [visibleDiagonalKm, setVisibleDiagonalKm] = useState<number | null>(null);
+  const [showSearchHereChip, setShowSearchHereChip] = useState(false);
+
+  // Panel UI state
+  const [presetPanelOpen, setPresetPanelOpen] = useState(true);
+  const [layersPanelOpen, setLayersPanelOpen] = useState(false);
+
+  // Search lifecycle
   const [boundsWarning, setBoundsWarning] = useState<string | null>(null);
   const [searchWarning, setSearchWarning] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -144,6 +215,25 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
   const selectedPreset = useMemo(() => getPresetById(presetId), [presetId]);
   const activeWarning = searchWarning ?? boundsWarning;
+  const overlaySource = useMemo(
+    () => OVERLAY_SOURCES.find((source) => source.id === overlayId) ?? OVERLAY_SOURCES[0],
+    [overlayId],
+  );
+  const gibsActive = overlaySource.kind === "gibs";
+
+  const filteredPresets = useMemo(() => {
+    const category = PRESET_CATEGORIES.find((c) => c.id === presetCategory) ?? PRESET_CATEGORIES[0];
+    const query = presetSearch.trim().toLowerCase();
+    return PRESETS.filter((preset) => {
+      if (!category.match(preset)) return false;
+      if (!query) return true;
+      return (
+        preset.name.toLowerCase().includes(query) ||
+        preset.description.toLowerCase().includes(query)
+      );
+    });
+  }, [presetCategory, presetSearch]);
+
   const difficultyEstimate = useMemo(
     () =>
       computeDifficultyEstimate(
@@ -166,10 +256,19 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
     const map = mapRef.current;
     if (map) {
-      syncLiveMapState(map, mode, tagFilter, selectedPreset.minZoom, setZoom, setVisibleDiagonalKm, setBoundsWarning);
+      syncLiveMapState(
+        map,
+        mode,
+        tagFilter,
+        selectedPreset.minZoom,
+        setZoom,
+        setVisibleDiagonalKm,
+        setBoundsWarning,
+      );
     }
   }, [mode, selectedPreset.minZoom, tagFilter]);
 
+  // Place autocomplete
   useEffect(() => {
     const input = locationQuery.trim();
     const service = autocompleteServiceRef.current;
@@ -182,17 +281,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     let cancelled = false;
     const timer = window.setTimeout(() => {
       setSuggestionsStatus(null);
-
       void service
-        .getPlacePredictions({
-          input,
-          componentRestrictions: { country: "us" },
-        })
+        .getPlacePredictions({ input, componentRestrictions: { country: "us" } })
         .then((response) => {
-          if (cancelled) {
-            return;
-          }
-
+          if (cancelled) return;
           const suggestions =
             response.predictions?.slice(0, 5).map((prediction) => ({
               description: prediction.description,
@@ -200,7 +292,6 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
               mainText: prediction.structured_formatting?.main_text ?? prediction.description,
               secondaryText: prediction.structured_formatting?.secondary_text ?? "",
             })) ?? [];
-
           setPlaceSuggestions(suggestions);
         })
         .catch(() => {
@@ -217,12 +308,48 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     };
   }, [locationQuery]);
 
-  const clearDataLayer = useCallback(() => {
+  // Apply map theme/style
+  useEffect(() => {
     const map = mapRef.current;
-    if (!map) {
+    if (!map) return;
+    map.setOptions({ styles: MAP_THEMES[mapTheme] ?? [] });
+  }, [mapTheme]);
+
+  // Tilt control
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.setTilt(tiltOn ? 45 : 0);
+  }, [tiltOn, mapType]);
+
+  // Manage overlay tile layer
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = mapsRef.current;
+    if (!map || !maps) return;
+
+    if (overlayMapTypeRef.current) {
+      const idx = map.overlayMapTypes.getArray().indexOf(overlayMapTypeRef.current);
+      if (idx >= 0) {
+        map.overlayMapTypes.removeAt(idx);
+      }
+      overlayMapTypeRef.current = null;
+    }
+
+    if (overlaySource.kind === "none") {
       return;
     }
 
+    const overlayType = buildOverlayMapType(maps, overlaySource, gibsDate, overlayOpacity);
+    if (overlayType) {
+      map.overlayMapTypes.push(overlayType);
+      overlayMapTypeRef.current = overlayType;
+    }
+  }, [overlaySource, gibsDate, overlayOpacity]);
+
+  const clearDataLayer = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
     selectedDataFeatureRef.current = null;
     map.data.forEach((feature) => {
       map.data.remove(feature);
@@ -255,10 +382,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
       try {
         const panorama = await findNearestStreetView(maps, service, coordinate);
-        if (streetViewLookupIdRef.current !== lookupId) {
-          return;
-        }
-
+        if (streetViewLookupIdRef.current !== lookupId) return;
         if (!panorama) {
           setStreetViewState({
             status: "none",
@@ -267,19 +391,14 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           });
           return;
         }
-
         setStreetViewState({ status: "open", sourceName, data: panorama });
       } catch (lookupError) {
-        if (streetViewLookupIdRef.current !== lookupId) {
-          return;
-        }
+        if (streetViewLookupIdRef.current !== lookupId) return;
         setStreetViewState({
           status: "error",
           sourceName,
           message:
-            lookupError instanceof Error
-              ? lookupError.message
-              : "Street View lookup failed.",
+            lookupError instanceof Error ? lookupError.message : "Street View lookup failed.",
         });
       }
     },
@@ -295,11 +414,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       const selected = selectedFeatureFromProperties(
         getDataFeatureProperties(feature) as ScoutFeatureProperties,
       );
-
-      if (!selected) {
-        return;
-      }
-
+      if (!selected) return;
       setSelectedFeature(selected);
       void runStreetViewLookup(selected.coordinate, selected.name);
     },
@@ -311,10 +426,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const renderFeatures = useCallback(
     (collection: GeoJSONFeatureCollection) => {
       const map = mapRef.current;
-      if (!map) {
-        return;
-      }
-
+      if (!map) return;
       clearDataLayer();
       map.data.addGeoJson(collection);
     },
@@ -333,12 +445,12 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     setRawFeatureCount(null);
     setError(null);
     setSearchWarning(null);
+    setShowSearchHereChip(false);
     setLoading(false);
   }, [clearDataLayer, closeStreetView]);
 
   const handleSearch = useCallback(async () => {
     const map = mapRef.current;
-
     if (!map) {
       setError("The map is not ready yet.");
       return;
@@ -346,7 +458,6 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
     const currentZoom = map.getZoom() ?? 0;
     const bbox = getCurrentMapBBox(map);
-
     if (!bbox) {
       setError("Move or zoom the map slightly so a search area is available, then search again.");
       return;
@@ -364,6 +475,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     const presetOptions: PresetQueryOptions = {
       includeBuildings: showBuildings,
       includeWater: showWater,
+      bufferScale,
     };
 
     try {
@@ -392,6 +504,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       bbox.east.toFixed(5),
       String(showBuildings),
       String(showWater),
+      String(bufferScale),
     ].join("|");
 
     if (loading && lastRequestKeyRef.current === requestKey) {
@@ -407,7 +520,17 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     setLoading(true);
     setError(null);
     setSelectedFeature(null);
+    setShowSearchHereChip(false);
     closeStreetView();
+
+    const center = map.getCenter();
+    if (center) {
+      lastSearchCenterRef.current = {
+        lat: center.lat(),
+        lng: center.lng(),
+        zoom: map.getZoom() ?? DEFAULT_ZOOM,
+      };
+    }
 
     const diagonalKm = bboxDiagonalKm(bbox);
     setSearchWarning(
@@ -418,9 +541,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
     try {
       const overpass = await runOverpassQuery(query, abortController.signal);
-      if (abortController.signal.aborted) {
-        return;
-      }
+      if (abortController.signal.aborted) return;
 
       const result =
         mode === "simple"
@@ -445,19 +566,13 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
                 simpleMatchLabel: "Matched raw Overpass QL",
               });
 
-      renderFeatures({
-        type: "FeatureCollection",
-        features: result.features,
-      });
+      renderFeatures({ type: "FeatureCollection", features: result.features });
       setRawFeatureCount(overpass.rawFeatureCount);
       setResultCount(result.resultCount);
       setRenderedFeatureCount(result.features.length);
       setSearchWarning(result.warnings[0] ?? null);
     } catch (searchError) {
-      if ((searchError as Error).name === "AbortError") {
-        return;
-      }
-
+      if ((searchError as Error).name === "AbortError") return;
       setError(
         searchError instanceof Error
           ? searchError.message
@@ -470,6 +585,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       }
     }
   }, [
+    bufferScale,
     closeStreetView,
     loading,
     mode,
@@ -484,17 +600,12 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const openMapCenterStreetView = useCallback(() => {
     const map = mapRef.current;
     const center = map?.getCenter();
-
     if (!center) {
       setError("The map center is not available yet.");
       return;
     }
-
     setError(null);
-    void runStreetViewLookup(
-      { lat: center.lat(), lng: center.lng() },
-      "Map center",
-    );
+    void runStreetViewLookup({ lat: center.lat(), lng: center.lng() }, "Map center");
   }, [runStreetViewLookup]);
 
   const scopeToLocation = useCallback(
@@ -502,12 +613,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       const map = mapRef.current;
       const geocoder = geocoderRef.current;
       const query = (queryOverride ?? locationQuery).trim();
-
       if (!map || !geocoder) {
         setError("Location search is not ready yet.");
         return;
       }
-
       if (!query) {
         setError("Enter a city, address, place, or coordinates to scope the map.");
         return;
@@ -515,93 +624,74 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
       setError(null);
       setPlaceSuggestions([]);
-      setLocationStatus(`Finding ${query}...`);
 
       geocoder.geocode(placeId ? { placeId } : { address: query }, (results, status) => {
         const result = results?.[0];
-
         if (status !== "OK" || !result) {
-          setLocationStatus("Location not found.");
           setError("Could not find that location. Try a more specific place name or address.");
           return;
         }
-
         if (result.geometry.viewport) {
           map.fitBounds(result.geometry.viewport);
         } else {
           map.setCenter(result.geometry.location);
           map.setZoom(Math.max(map.getZoom() ?? DEFAULT_ZOOM, 14));
         }
-
         window.setTimeout(() => {
           if ((map.getZoom() ?? 0) < 13) {
             map.setZoom(13);
           }
         }, 0);
-
         const formatted = result.formatted_address ?? query;
         setLocationQuery(formatted);
-        setLocationStatus(`Scoped to ${formatted}.`);
       });
     },
     [locationQuery],
   );
 
-  const scopeToWashingtonDc = useCallback(() => {
-    setLocationQuery(DEFAULT_LOCATION_QUERY);
-    const map = mapRef.current;
-
-    if (map) {
-      map.setCenter(DEFAULT_CENTER);
-      map.setZoom(DEFAULT_ZOOM);
-    }
-
-    setLocationStatus("Scoped to Washington, DC.");
-    setError(null);
-  }, []);
-
   const zoomMap = useCallback((delta: number) => {
     const map = mapRef.current;
-    if (!map) {
-      return;
-    }
-
+    if (!map) return;
     map.setZoom((map.getZoom() ?? DEFAULT_ZOOM) + delta);
   }, []);
 
-  const toggleMapType = useCallback(() => {
+  const setMapTypeId = useCallback((next: MapDisplayType) => {
     const map = mapRef.current;
-    if (!map) {
-      return;
-    }
-
-    const currentType = normalizeMapTypeId(map.getMapTypeId());
-    const nextType =
-      currentType === "satellite" || currentType === "hybrid" ? "roadmap" : "satellite";
-    map.setMapTypeId(nextType);
-    setMapType(nextType);
+    if (!map) return;
+    map.setMapTypeId(next);
+    setMapType(next);
   }, []);
 
   const resetMapCamera = useCallback(() => {
     const map = mapRef.current;
-    if (!map) {
-      return;
-    }
-
+    if (!map) return;
     map.setHeading(0);
     map.setTilt(0);
+    setTiltOn(false);
   }, []);
 
   const enterMapFullscreen = useCallback(() => {
     const region = mapRegionRef.current;
-    if (!region || document.fullscreenElement) {
-      return;
-    }
-
+    if (!region || document.fullscreenElement) return;
     void region.requestFullscreen().catch(() => {
       setError("Fullscreen is not available in this browser.");
     });
   }, []);
+
+  const handleNudgeDate = useCallback(
+    (days: number) => {
+      setGibsDate((prev) => {
+        const next = new Date(prev + "T00:00:00Z");
+        next.setUTCDate(next.getUTCDate() + days);
+        const today = new Date();
+        if (next.getTime() > today.getTime()) return formatGibsDate(today);
+        const min = new Date(GIBS_MIN_DATE + "T00:00:00Z");
+        if (next.getTime() < min.getTime()) return GIBS_MIN_DATE;
+        return formatGibsDate(next);
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -610,47 +700,43 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     async function setupMap() {
       try {
         const maps = await loadGoogleMaps(apiKey);
-        if (cancelled || !mapDivRef.current || mapRef.current) {
-          return;
-        }
+        if (cancelled || !mapDivRef.current || mapRef.current) return;
 
         mapsRef.current = maps;
         const map = new maps.maps.Map(mapDivRef.current, {
           center: DEFAULT_CENTER,
           zoom: DEFAULT_ZOOM,
           mapTypeId: "roadmap",
-          zoomControl: true,
-          mapTypeControl: true,
-          mapTypeControlOptions: {
-            position: maps.maps.ControlPosition.TOP_RIGHT,
-            style: maps.maps.MapTypeControlStyle.HORIZONTAL_BAR,
-          },
-          streetViewControl: true,
-          streetViewControlOptions: {
-            position: maps.maps.ControlPosition.RIGHT_BOTTOM,
-          },
-          fullscreenControl: true,
-          fullscreenControlOptions: {
-            position: maps.maps.ControlPosition.RIGHT_TOP,
-          },
-          rotateControl: true,
+          disableDefaultUI: true,
+          zoomControl: false,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+          rotateControl: false,
           scaleControl: true,
           clickableIcons: false,
+          gestureHandling: "greedy",
+          styles: MAP_THEMES.default,
         });
 
         mapRef.current = map;
         streetViewServiceRef.current = new maps.maps.StreetViewService();
         geocoderRef.current = new maps.maps.Geocoder();
         map.data.setStyle((feature) => styleForDataFeature(maps, feature));
-        void maps.maps.importLibrary("places").then((placesLibrary) => {
-          if (!cancelled && "AutocompleteService" in placesLibrary) {
-            autocompleteServiceRef.current = new placesLibrary.AutocompleteService();
-          }
-        }).catch(() => {
-          if (!cancelled) {
-            setSuggestionsStatus("Place suggestions unavailable; location search still works.");
-          }
-        });
+
+        void maps.maps
+          .importLibrary("places")
+          .then((placesLibrary) => {
+            if (!cancelled && "AutocompleteService" in placesLibrary) {
+              autocompleteServiceRef.current = new placesLibrary.AutocompleteService();
+            }
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setSuggestionsStatus("Place suggestions unavailable; location search still works.");
+            }
+          });
+
         const syncCurrentMapState = () => {
           const gate = searchGateRef.current;
           syncLiveMapState(
@@ -664,6 +750,19 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           );
         };
 
+        const maybeShowSearchHereChip = () => {
+          const last = lastSearchCenterRef.current;
+          if (!last) return;
+          const center = map.getCenter();
+          if (!center) return;
+          const movedKm = haversineKm(
+            { lat: last.lat, lng: last.lng },
+            { lat: center.lat(), lng: center.lng() },
+          );
+          const zoomedDelta = Math.abs((map.getZoom() ?? DEFAULT_ZOOM) - last.zoom);
+          setShowSearchHereChip(movedKm > 0.25 || zoomedDelta >= 1);
+        };
+
         listeners.push(
           map.data.addListener("click", (event: google.maps.Data.MouseEvent) => {
             dataFeatureClickRef.current(event.feature);
@@ -671,9 +770,13 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           map.addListener("maptypeid_changed", () => {
             setMapType(normalizeMapTypeId(map.getMapTypeId()));
           }),
-          map.addListener("idle", syncCurrentMapState),
+          map.addListener("idle", () => {
+            syncCurrentMapState();
+            maybeShowSearchHereChip();
+          }),
           map.addListener("bounds_changed", syncCurrentMapState),
         );
+
         window.setTimeout(syncCurrentMapState, 250);
         window.setTimeout(syncCurrentMapState, 1500);
         setMapStatus("Map ready");
@@ -694,16 +797,9 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   useEffect(() => {
     const maps = mapsRef.current;
     const container = streetViewDivRef.current;
-
-    if (streetViewState.status !== "open" || !maps || !container) {
-      return;
-    }
-
+    if (streetViewState.status !== "open" || !maps || !container) return;
     const location = streetViewState.data.location;
-    if (!location?.pano || !location.latLng) {
-      return;
-    }
-
+    if (!location?.pano || !location.latLng) return;
     panoramaRef.current = new maps.maps.StreetViewPanorama(container, {
       pano: location.pano,
       position: location.latLng,
@@ -719,235 +815,125 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar" aria-label="Overpass Scout View controls">
-        <header className="sidebar-header">
-          <p className="eyebrow">OpenStreetMap + Google Street View</p>
-          <h1>Overpass Scout View</h1>
-          <p className="status-line">
-            {mapStatus} <span aria-label={`Current zoom ${zoom}`}>Zoom {zoom}</span>
-          </p>
-        </header>
+      <main ref={mapRegionRef} className="map-region" aria-label="Map workspace">
+        <div ref={mapDivRef} className="map-canvas" aria-label="Google map" />
 
-        <section className="control-section">
-          <form
-            className="location-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              scopeToLocation();
-            }}
+        <SearchPill
+          locationQuery={locationQuery}
+          onLocationChange={(value) => {
+            setLocationQuery(value);
+            setSuggestionsStatus(null);
+          }}
+          onSubmit={() => scopeToLocation()}
+          suggestions={placeSuggestions}
+          suggestionsStatus={suggestionsStatus}
+          onSelectSuggestion={(suggestion) =>
+            scopeToLocation(suggestion.description, suggestion.placeId)
+          }
+          onClearSuggestions={() => setPlaceSuggestions([])}
+          loading={loading}
+          mapStatus={mapStatus}
+          zoom={zoom}
+        />
+
+        {showSearchHereChip && !loading ? (
+          <button
+            type="button"
+            className="search-here-chip"
+            onClick={() => void handleSearch()}
+            aria-label="Search this area"
           >
-            <label htmlFor="location-search">Search and scope to location</label>
-            <input
-              id="location-search"
-              value={locationQuery}
-              onChange={(event) => {
-                setLocationQuery(event.target.value);
-                setSuggestionsStatus(null);
-              }}
-              placeholder="Washington, DC"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            {placeSuggestions.length > 0 ? (
-              <div className="suggestion-list" role="listbox" aria-label="Location suggestions">
-                {placeSuggestions.map((suggestion) => (
-                  <button
-                    key={suggestion.placeId}
-                    type="button"
-                    className="suggestion-option"
-                    onClick={() => scopeToLocation(suggestion.description, suggestion.placeId)}
-                  >
-                    <span>{suggestion.mainText}</span>
-                    {suggestion.secondaryText ? <small>{suggestion.secondaryText}</small> : null}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <div className="inline-actions">
-              <button type="submit">Go to location</button>
-              <button type="button" onClick={scopeToWashingtonDc}>
-                Washington DC
-              </button>
-            </div>
-          </form>
-          <p className="query-summary">{locationStatus}</p>
-          {suggestionsStatus ? <p className="muted">{suggestionsStatus}</p> : null}
-        </section>
-
-        <section className="control-section">
-          <label htmlFor="mode">Mode</label>
-          <select
-            id="mode"
-            value={mode}
-            onChange={(event) => {
-              setMode(event.target.value as Mode);
-              setError(null);
-              setSearchWarning(null);
-            }}
-          >
-            <option value="simple">Simple tag search</option>
-            <option value="preset">Premade queries</option>
-            <option value="raw">Raw Overpass QL</option>
-          </select>
-          <p className="query-summary">
-            Current: {mode === "simple" ? tagFilter : mode === "preset" ? selectedPreset.name : "Raw Overpass QL"}
-          </p>
-        </section>
-
-        {mode === "simple" ? (
-          <section className="control-section">
-            <label htmlFor="tag-filter">Overpass tag filter</label>
-            <input
-              id="tag-filter"
-              value={tagFilter}
-              onChange={(event) => setTagFilter(event.target.value)}
-              placeholder="amenity=restaurant"
-              spellCheck={false}
-            />
-            <div className="preset-grid" aria-label="Simple tag presets">
-              {SIMPLE_PRESETS.map((preset) => (
-                <button
-                  key={preset.filter}
-                  type="button"
-                  className="small-button"
-                  onClick={() => setTagFilter(preset.filter)}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          </section>
-        ) : mode === "preset" ? (
-          <section className="control-section">
-            <label htmlFor="premade-query">Premade query</label>
-            <select
-              id="premade-query"
-              value={presetId}
-              onChange={(event) => setPresetId(event.target.value as PresetId)}
-            >
-              {PRESETS.map((preset) => (
-                <option key={preset.id} value={preset.id}>
-                  {preset.name}
-                </option>
-              ))}
-            </select>
-            <p className="muted">{selectedPreset.description}</p>
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={showBuildings}
-                disabled={!selectedPreset.supportsBuildings}
-                onChange={(event) => setShowBuildings(event.target.checked)}
-              />
-              <span>Show context buildings</span>
-            </label>
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={showWater}
-                disabled={!selectedPreset.supportsWater}
-                onChange={(event) => setShowWater(event.target.checked)}
-              />
-              <span>Show context water</span>
-            </label>
-          </section>
-        ) : (
-          <section className="control-section">
-            <label htmlFor="raw-query">Raw Overpass QL</label>
-            <textarea
-              id="raw-query"
-              className="raw-query-input"
-              value={rawQuery}
-              onChange={(event) => setRawQuery(event.target.value)}
-              spellCheck={false}
-              rows={12}
-            />
-            <p className="muted">
-              Paste Overpass Turbo-style QL. Use <code>{"{{bbox}}"}</code> to scope the query to
-              the current map view.
-            </p>
-          </section>
-        )}
-
-        <section className="difficulty-panel" aria-live="polite">
-          <div className="difficulty-heading">
-            <span>Compute difficulty</span>
-            <strong className={`difficulty-badge difficulty-${difficultyEstimate.level}`}>
-              {difficultyEstimate.label}
-            </strong>
-          </div>
-          <p>{difficultyEstimate.detail}</p>
-          <p className="muted">{difficultyEstimate.scope}</p>
-        </section>
-
-        <section className="button-stack">
-          <button type="button" className="primary-button" onClick={() => void handleSearch()}>
-            {loading ? "Searching..." : "Search this area"}
+            <RefreshIcon />
+            Search this area
           </button>
-          <button type="button" onClick={clearResults}>
-            Clear results
-          </button>
-          <button type="button" onClick={openMapCenterStreetView}>
-            Use map center for Street View
-          </button>
-        </section>
-
-        <section className="stats-panel" aria-live="polite">
-          <dl>
-            <div>
-              <dt>Results</dt>
-              <dd>{resultCount.toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt>Rendered</dt>
-              <dd>{renderedFeatureCount.toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt>Raw Overpass</dt>
-              <dd>{rawFeatureCount === null ? "n/a" : rawFeatureCount.toLocaleString()}</dd>
-            </div>
-          </dl>
-        </section>
-
-        {activeWarning ? <p className="notice warning">{activeWarning}</p> : null}
-        {error ? <p className="notice error">{error}</p> : null}
-
-        {selectedFeature ? (
-          <FeaturePanel selectedFeature={selectedFeature} streetViewState={streetViewState} />
         ) : null}
 
-        <section className="instructions">
-          <h2>Basics</h2>
-          <p>
-            Pan and zoom the map, then search this area. Click a rendered feature to inspect its
-            tags and look for nearby Street View.
-          </p>
-          <p>
-            Map data/results from OpenStreetMap via Overpass API. Basemap and Street View from
-            Google Maps.
-          </p>
-          <p>
-            Results are based on OpenStreetMap tags and spatial heuristics. Access/legal status may
-            be incomplete or incorrect. Always verify signs, local laws, and property boundaries.
-          </p>
-          <p>
-            Google Street View should be used only for inspection/viewing, not copying data into
-            OpenStreetMap.
-          </p>
-        </section>
-      </aside>
+        <PresetPanel
+          open={presetPanelOpen}
+          onToggle={() => setPresetPanelOpen((v) => !v)}
+          mode={mode}
+          onModeChange={setMode}
+          presetId={presetId}
+          onPresetChange={setPresetId}
+          presetSearch={presetSearch}
+          onPresetSearchChange={setPresetSearch}
+          presetCategory={presetCategory}
+          onPresetCategoryChange={setPresetCategory}
+          filteredPresets={filteredPresets}
+          selectedPreset={selectedPreset}
+          showBuildings={showBuildings}
+          onShowBuildingsChange={setShowBuildings}
+          showWater={showWater}
+          onShowWaterChange={setShowWater}
+          bufferScale={bufferScale}
+          onBufferScaleChange={setBufferScale}
+          tagFilter={tagFilter}
+          onTagFilterChange={setTagFilter}
+          rawQuery={rawQuery}
+          onRawQueryChange={setRawQuery}
+          loading={loading}
+          difficulty={difficultyEstimate}
+          onSearch={() => void handleSearch()}
+          onClear={clearResults}
+          resultCount={resultCount}
+          renderedFeatureCount={renderedFeatureCount}
+          rawFeatureCount={rawFeatureCount}
+        />
 
-      <main ref={mapRegionRef} className="map-region">
-        <div ref={mapDivRef} className="map-canvas" aria-label="Google map" />
-        <MapToolbox
+        <LayersPanel
+          open={layersPanelOpen}
+          onToggle={() => setLayersPanelOpen((v) => !v)}
           mapType={mapType}
-          onStreetView={openMapCenterStreetView}
+          onMapTypeChange={setMapTypeId}
+          theme={mapTheme}
+          onThemeChange={setMapTheme}
+          tiltOn={tiltOn}
+          onTiltChange={setTiltOn}
+          overlayId={overlayId}
+          onOverlayChange={setOverlayId}
+          overlayOpacity={overlayOpacity}
+          onOverlayOpacityChange={setOverlayOpacity}
+        />
+
+        <MapControls
+          tiltOn={tiltOn}
           onZoomIn={() => zoomMap(1)}
           onZoomOut={() => zoomMap(-1)}
-          onToggleMapType={toggleMapType}
+          onToggleTilt={() => setTiltOn((v) => !v)}
           onResetCamera={resetMapCamera}
           onFullscreen={enterMapFullscreen}
+          onStreetView={openMapCenterStreetView}
         />
+
+        {gibsActive ? (
+          <TimeDock
+            value={gibsDate}
+            min={GIBS_MIN_DATE}
+            max={formatGibsDate(new Date())}
+            sourceLabel={overlaySource.shortLabel}
+            onChange={setGibsDate}
+            onNudge={handleNudgeDate}
+          />
+        ) : null}
+
+        <div className="toast-stack" aria-live="polite">
+          {activeWarning ? <p className="notice warning">{activeWarning}</p> : null}
+          {error ? <p className="notice error">{error}</p> : null}
+        </div>
+
+        {selectedFeature ? (
+          <FeatureCard
+            selectedFeature={selectedFeature}
+            streetViewState={streetViewState}
+            onClose={() => {
+              setSelectedFeature(null);
+              selectedDataFeatureRef.current?.setProperty("scoutSelected", false);
+              selectedDataFeatureRef.current = null;
+              closeStreetView();
+            }}
+          />
+        ) : null}
+
         {streetViewState.status === "open" ? (
           <section className="street-view-panel" aria-label="Google Street View inspection">
             <div className="street-view-header">
@@ -955,8 +941,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
                 <p className="eyebrow">Street View</p>
                 <h2>{streetViewState.sourceName}</h2>
               </div>
-              <button type="button" onClick={closeStreetView}>
-                Close Street View
+              <button type="button" className="ghost-button" onClick={closeStreetView}>
+                Close
               </button>
             </div>
             <div ref={streetViewDivRef} className="street-view-canvas" />
@@ -967,55 +953,795 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   );
 }
 
-function MapToolbox({
-  mapType,
-  onStreetView,
-  onZoomIn,
-  onZoomOut,
-  onToggleMapType,
-  onResetCamera,
-  onFullscreen,
+/* ---------------- SearchPill ---------------- */
+
+function SearchPill({
+  locationQuery,
+  onLocationChange,
+  onSubmit,
+  suggestions,
+  suggestionsStatus,
+  onSelectSuggestion,
+  onClearSuggestions,
+  loading,
+  mapStatus,
+  zoom,
 }: {
-  mapType: string;
-  onStreetView: () => void;
+  locationQuery: string;
+  onLocationChange: (value: string) => void;
+  onSubmit: () => void;
+  suggestions: PlaceSuggestion[];
+  suggestionsStatus: string | null;
+  onSelectSuggestion: (suggestion: PlaceSuggestion) => void;
+  onClearSuggestions: () => void;
+  loading: boolean;
+  mapStatus: string;
+  zoom: number;
+}) {
+  return (
+    <form
+      className="search-pill"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+      role="search"
+      aria-label="Search location"
+    >
+      <div className="search-pill-row">
+        <span className="icon-button" aria-hidden="true">
+          <SearchIcon />
+        </span>
+        <input
+          value={locationQuery}
+          onChange={(event) => onLocationChange(event.target.value)}
+          placeholder="Search Google Maps"
+          autoComplete="off"
+          spellCheck={false}
+          aria-label="Location"
+        />
+        {locationQuery ? (
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => {
+              onLocationChange("");
+              onClearSuggestions();
+            }}
+            aria-label="Clear"
+          >
+            <CloseIcon />
+          </button>
+        ) : null}
+        <div className="pill-divider" aria-hidden="true" />
+        <button
+          type="submit"
+          className="icon-button"
+          aria-label="Search"
+          title={`${mapStatus} · zoom ${zoom}`}
+          disabled={loading}
+        >
+          {loading ? <SpinnerIcon /> : <ArrowRightIcon />}
+        </button>
+      </div>
+      {suggestions.length > 0 ? (
+        <div className="search-suggestions" role="listbox" aria-label="Location suggestions">
+          {suggestions.map((suggestion) => (
+            <button
+              key={suggestion.placeId}
+              type="button"
+              className="search-suggestion"
+              onClick={() => onSelectSuggestion(suggestion)}
+            >
+              <span className="pin-icon" aria-hidden="true">
+                <PinIcon />
+              </span>
+              <span className="search-suggestion-main">
+                <strong>{suggestion.mainText}</strong>
+                {suggestion.secondaryText ? <small>{suggestion.secondaryText}</small> : null}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : suggestionsStatus ? (
+        <div className="search-suggestion-status">{suggestionsStatus}</div>
+      ) : null}
+    </form>
+  );
+}
+
+/* ---------------- PresetPanel ---------------- */
+
+function PresetPanel(props: {
+  open: boolean;
+  onToggle: () => void;
+  mode: Mode;
+  onModeChange: (mode: Mode) => void;
+  presetId: PresetId;
+  onPresetChange: (id: PresetId) => void;
+  presetSearch: string;
+  onPresetSearchChange: (value: string) => void;
+  presetCategory: string;
+  onPresetCategoryChange: (id: string) => void;
+  filteredPresets: PresetDefinition[];
+  selectedPreset: PresetDefinition;
+  showBuildings: boolean;
+  onShowBuildingsChange: (value: boolean) => void;
+  showWater: boolean;
+  onShowWaterChange: (value: boolean) => void;
+  bufferScale: number;
+  onBufferScaleChange: (value: number) => void;
+  tagFilter: string;
+  onTagFilterChange: (value: string) => void;
+  rawQuery: string;
+  onRawQueryChange: (value: string) => void;
+  loading: boolean;
+  difficulty: DifficultyEstimate;
+  onSearch: () => void;
+  onClear: () => void;
+  resultCount: number;
+  renderedFeatureCount: number;
+  rawFeatureCount: number | null;
+}) {
+  return (
+    <aside className={`panel preset-panel ${props.open ? "" : "collapsed"}`} aria-label="Scout queries">
+      <div className="panel-header">
+        <span className="panel-icon" aria-hidden="true">
+          <CompassIcon />
+        </span>
+        <h2>Scout queries</h2>
+        <button
+          type="button"
+          className="panel-toggle"
+          onClick={props.onToggle}
+          aria-label={props.open ? "Collapse panel" : "Expand panel"}
+          aria-expanded={props.open}
+        >
+          <ChevronUpIcon />
+        </button>
+      </div>
+
+      <div className="panel-body">
+        <div className="panel-section">
+          <div className="preset-search">
+            <span className="preset-search-icon" aria-hidden="true">
+              <SearchIcon />
+            </span>
+            <input
+              value={props.presetSearch}
+              onChange={(event) => props.onPresetSearchChange(event.target.value)}
+              placeholder="Search 34 premade queries"
+              spellCheck={false}
+            />
+          </div>
+          <div className="category-chips" role="tablist" aria-label="Preset categories">
+            {PRESET_CATEGORIES.map((category) => (
+              <button
+                key={category.id}
+                type="button"
+                role="tab"
+                className="chip"
+                aria-pressed={category.id === props.presetCategory}
+                onClick={() => props.onPresetCategoryChange(category.id)}
+              >
+                {category.label}
+              </button>
+            ))}
+          </div>
+          <div className="preset-list" role="listbox" aria-label="Premade scouting queries">
+            {props.filteredPresets.length === 0 ? (
+              <p className="search-suggestion-status">No presets match your search.</p>
+            ) : (
+              props.filteredPresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className="preset-card"
+                  aria-pressed={preset.id === props.presetId}
+                  onClick={() => {
+                    props.onModeChange("preset");
+                    props.onPresetChange(preset.id);
+                  }}
+                >
+                  <span className="preset-card-icon" aria-hidden="true">
+                    <PresetGlyph presetId={preset.id} />
+                  </span>
+                  <span className="preset-card-body">
+                    <span className="preset-card-title">{preset.name}</span>
+                    <span className="preset-card-desc">{preset.description}</span>
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+
+        {props.mode === "preset" ? (
+          <div className="panel-section">
+            <p className="panel-section-title">Parameters · {props.selectedPreset.name}</p>
+            <div className="preset-tuner">
+              <div className="tuner-row">
+                <label>
+                  Buffer radius
+                  <strong>{props.bufferScale.toFixed(2)}×</strong>
+                </label>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={2}
+                  step={0.25}
+                  value={props.bufferScale}
+                  onChange={(event) =>
+                    props.onBufferScaleChange(Number(event.target.value))
+                  }
+                  aria-label="Buffer radius multiplier"
+                />
+              </div>
+              <label className="toggle-row">
+                <span>
+                  Context buildings
+                  <small>Render mapped buildings within the buffer</small>
+                </span>
+                <span className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={props.showBuildings}
+                    disabled={!props.selectedPreset.supportsBuildings}
+                    onChange={(event) => props.onShowBuildingsChange(event.target.checked)}
+                  />
+                  <span className="slider" />
+                </span>
+              </label>
+              <label className="toggle-row">
+                <span>
+                  Context water
+                  <small>Show nearby water features</small>
+                </span>
+                <span className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={props.showWater}
+                    disabled={!props.selectedPreset.supportsWater}
+                    onChange={(event) => props.onShowWaterChange(event.target.checked)}
+                  />
+                  <span className="slider" />
+                </span>
+              </label>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="panel-section">
+          <div className="difficulty-line">
+            <span>{props.difficulty.scope}</span>
+            <span className={`difficulty-badge difficulty-${props.difficulty.level}`}>
+              {props.difficulty.label}
+            </span>
+          </div>
+          <div className="action-row">
+            <button
+              type="button"
+              className="primary-button"
+              onClick={props.onSearch}
+              disabled={props.loading}
+            >
+              <SearchIcon />
+              {props.loading ? "Searching..." : "Search this area"}
+            </button>
+            <button type="button" className="ghost-button" onClick={props.onClear}>
+              Clear
+            </button>
+          </div>
+          <dl className="stats-strip">
+            <div>
+              <dt>Results</dt>
+              <dd>{props.resultCount.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Rendered</dt>
+              <dd>{props.renderedFeatureCount.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Raw OSM</dt>
+              <dd>
+                {props.rawFeatureCount === null ? "—" : props.rawFeatureCount.toLocaleString()}
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <details className="advanced-disclosure" open={props.mode !== "preset"}>
+          <summary>
+            <ChevronRightIcon />
+            Advanced search
+          </summary>
+          <div className="advanced-body">
+            <div className="segmented" role="tablist" aria-label="Search mode">
+              <button
+                type="button"
+                role="tab"
+                aria-pressed={props.mode === "preset"}
+                onClick={() => props.onModeChange("preset")}
+              >
+                Premade
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-pressed={props.mode === "simple"}
+                onClick={() => props.onModeChange("simple")}
+              >
+                Simple tag
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-pressed={props.mode === "raw"}
+                onClick={() => props.onModeChange("raw")}
+              >
+                Raw QL
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-pressed={false}
+                onClick={() => props.onClear()}
+                title="Clear results"
+              >
+                Reset
+              </button>
+            </div>
+
+            {props.mode === "simple" ? (
+              <div className="tuner-row">
+                <label htmlFor="tag-filter">Tag filter</label>
+                <input
+                  id="tag-filter"
+                  value={props.tagFilter}
+                  onChange={(event) => props.onTagFilterChange(event.target.value)}
+                  placeholder="amenity=restaurant"
+                  spellCheck={false}
+                />
+                <div className="simple-preset-grid">
+                  {SIMPLE_PRESETS.map((preset) => (
+                    <button
+                      key={preset.filter}
+                      type="button"
+                      onClick={() => props.onTagFilterChange(preset.filter)}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {props.mode === "raw" ? (
+              <div className="tuner-row">
+                <label htmlFor="raw-query">Overpass QL</label>
+                <textarea
+                  id="raw-query"
+                  className="raw-query-input"
+                  value={props.rawQuery}
+                  onChange={(event) => props.onRawQueryChange(event.target.value)}
+                  spellCheck={false}
+                  rows={10}
+                />
+              </div>
+            ) : null}
+          </div>
+        </details>
+      </div>
+    </aside>
+  );
+}
+
+/* ---------------- LayersPanel ---------------- */
+
+function LayersPanel(props: {
+  open: boolean;
+  onToggle: () => void;
+  mapType: MapDisplayType;
+  onMapTypeChange: (next: MapDisplayType) => void;
+  theme: ThemeId;
+  onThemeChange: (next: ThemeId) => void;
+  tiltOn: boolean;
+  onTiltChange: (value: boolean) => void;
+  overlayId: OverlayId;
+  onOverlayChange: (next: OverlayId) => void;
+  overlayOpacity: number;
+  onOverlayOpacityChange: (value: number) => void;
+}) {
+  return (
+    <aside className={`panel layers-panel ${props.open ? "" : "collapsed"}`} aria-label="Layers">
+      <div className="panel-header">
+        <span className="panel-icon" aria-hidden="true">
+          <LayersIcon />
+        </span>
+        <h2>Layers</h2>
+        <button
+          type="button"
+          className="panel-toggle"
+          onClick={props.onToggle}
+          aria-label={props.open ? "Collapse layers panel" : "Expand layers panel"}
+          aria-expanded={props.open}
+        >
+          <ChevronUpIcon />
+        </button>
+      </div>
+
+      <div className="panel-body">
+        <div className="panel-section">
+          <p className="panel-section-title">Base map</p>
+          <div className="segmented" role="tablist" aria-label="Map type">
+            {(["roadmap", "satellite", "hybrid", "terrain"] as const).map((mt) => (
+              <button
+                key={mt}
+                type="button"
+                role="tab"
+                aria-pressed={props.mapType === mt}
+                onClick={() => props.onMapTypeChange(mt)}
+              >
+                {mt === "roadmap" ? "Road" : mt[0].toUpperCase() + mt.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel-section">
+          <p className="panel-section-title">Color theme</p>
+          <div className="swatch-row">
+            {(Object.keys(MAP_THEMES) as ThemeId[]).map((themeId) => (
+              <button
+                key={themeId}
+                type="button"
+                className={`swatch theme-${themeId}`}
+                aria-pressed={props.theme === themeId}
+                onClick={() => props.onThemeChange(themeId)}
+                title={themeLabel(themeId)}
+              >
+                {themeLabel(themeId)[0]}
+              </button>
+            ))}
+          </div>
+          <p className="search-suggestion-status" style={{ padding: 0 }}>
+            Themes apply to road and terrain maps.
+          </p>
+        </div>
+
+        <div className="panel-section">
+          <p className="panel-section-title">3D view</p>
+          <label className="toggle-row">
+            <span>
+              45° tilt
+              <small>Aerial 45° imagery in satellite or hybrid mode</small>
+            </span>
+            <span className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={props.tiltOn}
+                onChange={(event) => props.onTiltChange(event.target.checked)}
+              />
+              <span className="slider" />
+            </span>
+          </label>
+        </div>
+
+        <div className="panel-section">
+          <p className="panel-section-title">Overlay imagery</p>
+          <div className="radio-list" role="radiogroup" aria-label="Overlay tiles">
+            {OVERLAY_SOURCES.map((source) => (
+              <label key={source.id} className="radio-row">
+                <input
+                  type="radio"
+                  name="overlay"
+                  checked={props.overlayId === source.id}
+                  onChange={() => props.onOverlayChange(source.id)}
+                />
+                <span>
+                  {source.label}
+                  <small>{source.attribution}</small>
+                </span>
+                <span />
+              </label>
+            ))}
+          </div>
+          {props.overlayId !== "none" ? (
+            <div className="tuner-row">
+              <label>
+                Opacity
+                <strong>{Math.round(props.overlayOpacity * 100)}%</strong>
+              </label>
+              <input
+                type="range"
+                min={0.1}
+                max={1}
+                step={0.05}
+                value={props.overlayOpacity}
+                onChange={(event) => props.onOverlayOpacityChange(Number(event.target.value))}
+                aria-label="Overlay opacity"
+              />
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+/* ---------------- MapControls ---------------- */
+
+function MapControls(props: {
+  tiltOn: boolean;
   onZoomIn: () => void;
   onZoomOut: () => void;
-  onToggleMapType: () => void;
+  onToggleTilt: () => void;
   onResetCamera: () => void;
   onFullscreen: () => void;
+  onStreetView: () => void;
 }) {
-  const nextMapType =
-    mapType === "satellite" || mapType === "hybrid" ? "road map" : "satellite";
-
   return (
-    <nav className="map-toolbox" aria-label="Google Maps tools">
-      <button type="button" onClick={onStreetView} aria-label="Open Street View at map center">
-        <StreetViewIcon />
-      </button>
-      <button type="button" onClick={onZoomIn} aria-label="Zoom in">
-        <PlusIcon />
-      </button>
-      <button type="button" onClick={onZoomOut} aria-label="Zoom out">
-        <MinusIcon />
-      </button>
-      <button
-        type="button"
-        onClick={onToggleMapType}
-        aria-label={`Switch to ${nextMapType}`}
-      >
-        <LayersIcon />
-      </button>
-      <button type="button" onClick={onResetCamera} aria-label="Reset map tilt and heading">
-        <CompassIcon />
-      </button>
-      <button type="button" onClick={onFullscreen} aria-label="Open map fullscreen">
-        <FullscreenIcon />
-      </button>
+    <nav className="map-controls" aria-label="Map controls">
+      <div className="icon-stack">
+        <button type="button" onClick={props.onStreetView} aria-label="Open Street View at map center" title="Street View">
+          <PegmanIcon />
+        </button>
+      </div>
+      <div className="icon-stack">
+        <button type="button" onClick={props.onZoomIn} aria-label="Zoom in" title="Zoom in">
+          <PlusIcon />
+        </button>
+        <button type="button" onClick={props.onZoomOut} aria-label="Zoom out" title="Zoom out">
+          <MinusIcon />
+        </button>
+      </div>
+      <div className="icon-stack">
+        <button
+          type="button"
+          onClick={props.onToggleTilt}
+          aria-label="Toggle 45 degree tilt"
+          aria-pressed={props.tiltOn}
+          title="3D tilt"
+        >
+          <CubeIcon />
+        </button>
+        <button type="button" onClick={props.onResetCamera} aria-label="Reset map view" title="Reset view">
+          <NorthIcon />
+        </button>
+        <button type="button" onClick={props.onFullscreen} aria-label="Fullscreen" title="Fullscreen">
+          <FullscreenIcon />
+        </button>
+      </div>
     </nav>
   );
 }
 
-function StreetViewIcon() {
+/* ---------------- TimeDock ---------------- */
+
+function TimeDock({
+  value,
+  min,
+  max,
+  sourceLabel,
+  onChange,
+  onNudge,
+}: {
+  value: string;
+  min: string;
+  max: string;
+  sourceLabel: string;
+  onChange: (value: string) => void;
+  onNudge: (days: number) => void;
+}) {
+  const minTime = new Date(min + "T00:00:00Z").getTime();
+  const maxTime = new Date(max + "T00:00:00Z").getTime();
+  const valueTime = new Date(value + "T00:00:00Z").getTime();
+  return (
+    <section className="time-dock" aria-label="Imagery date">
+      <div className="time-label">
+        <strong>{formatHumanDate(value)}</strong>
+        <small>{sourceLabel}</small>
+      </div>
+      <input
+        type="range"
+        min={minTime}
+        max={maxTime}
+        step={86_400_000}
+        value={valueTime}
+        onChange={(event) => {
+          const next = new Date(Number(event.target.value));
+          onChange(formatGibsDate(next));
+        }}
+        aria-label="Imagery date slider"
+      />
+      <button type="button" className="nudge" onClick={() => onNudge(-1)} aria-label="Previous day">
+        <ChevronLeftIcon />
+      </button>
+      <button type="button" className="nudge" onClick={() => onNudge(1)} aria-label="Next day">
+        <ChevronRightIcon />
+      </button>
+    </section>
+  );
+}
+
+/* ---------------- FeatureCard ---------------- */
+
+function FeatureCard({
+  selectedFeature,
+  streetViewState,
+  onClose,
+}: {
+  selectedFeature: SelectedFeature;
+  streetViewState: StreetViewState;
+  onClose: () => void;
+}) {
+  const tagRows = summarizeTags(selectedFeature.tags, 10);
+  const address = buildAddressFromTags(selectedFeature.tags);
+  const externalLinks = buildExternalLinks(selectedFeature.coordinate, address);
+
+  return (
+    <section className="feature-card" aria-label="Selected feature">
+      <div className="feature-card-header">
+        <div>
+          <p className="eyebrow">Selected feature</p>
+          <h2>{selectedFeature.name}</h2>
+          <small>
+            {selectedFeature.osmType ?? "feature"} {selectedFeature.osmId ?? ""} ·{" "}
+            {formatCoordinate(selectedFeature.coordinate)}
+          </small>
+        </div>
+        <button type="button" className="panel-toggle" onClick={onClose} aria-label="Close">
+          <CloseIcon />
+        </button>
+      </div>
+      <div className="feature-card-body">
+        {address ? (
+          <dl className="feature-card-row">
+            <dt>Address</dt>
+            <dd>{address}</dd>
+          </dl>
+        ) : null}
+        <dl className="feature-card-row">
+          <dt>Match</dt>
+          <dd>
+            {selectedFeature.matchReason.label}
+            {selectedFeature.matchReason.distanceMeters !== undefined
+              ? ` · ${formatMetersForUi(selectedFeature.matchReason.distanceMeters)}`
+              : ""}
+          </dd>
+        </dl>
+        {selectedFeature.matchReason.detail ? (
+          <p style={{ color: "var(--muted)", fontSize: "0.78rem", margin: 0 }}>
+            {selectedFeature.matchReason.detail}
+          </p>
+        ) : null}
+        <div className="external-links">
+          {externalLinks.map((link) => (
+            <a
+              key={link.label}
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="external-link"
+            >
+              {link.label}
+            </a>
+          ))}
+        </div>
+        {tagRows.length > 0 ? (
+          <ul className="tag-list">
+            {tagRows.map((tag) => (
+              <li key={tag}>{tag}</li>
+            ))}
+          </ul>
+        ) : null}
+        <StreetViewStatus state={streetViewState} />
+      </div>
+    </section>
+  );
+}
+
+function StreetViewStatus({ state }: { state: StreetViewState }) {
+  if (state.status === "searching") {
+    return <p className="notice">Looking for nearby Street View...</p>;
+  }
+  if (state.status === "none" || state.status === "error") {
+    return <p className="notice warning">{state.message}</p>;
+  }
+  if (state.status === "open") {
+    return <p className="notice success">Street View found.</p>;
+  }
+  return null;
+}
+
+/* ---------------- Icon set ---------------- */
+
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  );
+}
+
+function ArrowRightIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 12h14M13 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 4a8 8 0 1 1-8 8" />
+    </svg>
+  );
+}
+
+function ChevronUpIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m6 15 6-6 6 6" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+function ChevronLeftIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m15 6-6 6 6 6" />
+    </svg>
+  );
+}
+
+function PinIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 22s7-7 7-12a7 7 0 1 0-14 0c0 5 7 12 7 12z" />
+      <circle cx="12" cy="10" r="2.5" />
+    </svg>
+  );
+}
+
+function CompassIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m14.6 7.6-1.8 5.2-5.2 1.8 1.8-5.2z" />
+    </svg>
+  );
+}
+
+function LayersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m12 4 8 4-8 4-8-4z" />
+      <path d="m4 12 8 4 8-4" />
+      <path d="m4 16 8 4 8-4" />
+    </svg>
+  );
+}
+
+function PegmanIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="5" r="2.3" />
@@ -1041,21 +1767,20 @@ function MinusIcon() {
   );
 }
 
-function LayersIcon() {
+function CubeIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="m12 4 8 4-8 4-8-4z" />
-      <path d="m4 12 8 4 8-4" />
-      <path d="m4 16 8 4 8-4" />
+      <path d="M12 3 3 8l9 5 9-5z" />
+      <path d="M3 8v8l9 5 9-5V8" />
+      <path d="M12 13v8" />
     </svg>
   );
 }
 
-function CompassIcon() {
+function NorthIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="12" r="8" />
-      <path d="m14.6 7.6-1.8 5.2-5.2 1.8 1.8-5.2z" />
+      <path d="M12 3 8 12h3v8h2v-8h3z" />
     </svg>
   );
 }
@@ -1066,6 +1791,163 @@ function FullscreenIcon() {
       <path d="M8 4H4v4M16 4h4v4M8 20H4v-4M16 20h4v-4" />
     </svg>
   );
+}
+
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 12a9 9 0 1 1 3 6.7" />
+      <path d="M3 19v-5h5" />
+    </svg>
+  );
+}
+
+function PresetGlyph({ presetId }: { presetId: PresetId }) {
+  switch (true) {
+    case /^preset-(01|02|15|16)$/.test(presetId):
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 18c2-4 6-4 8 0s6 4 8 0" />
+        </svg>
+      );
+    case /^preset-(05|08|17|24|21)$/.test(presetId):
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 14c3-3 5-3 8 0s5 3 8 0" />
+          <path d="M3 18c3-3 5-3 8 0s5 3 8 0" />
+        </svg>
+      );
+    case /^preset-(06|23)$/.test(presetId):
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 12h18M5 12V8m14 4V8M9 16v4m6-4v4" />
+        </svg>
+      );
+    case /^preset-(04|09|10|19|20|22)$/.test(presetId):
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="6" y="4" width="12" height="16" rx="2" />
+          <path d="M9 9h4a2 2 0 1 1 0 4H9z" />
+        </svg>
+      );
+    case /^preset-(07|11|18|28|33)$/.test(presetId):
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4v9" />
+          <circle cx="12" cy="17" r="3" />
+        </svg>
+      );
+    case /^preset-(26|27|31|32)$/.test(presetId):
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 20s3-3 4-6 4-4 5-8" />
+          <circle cx="14" cy="6" r="1.5" />
+        </svg>
+      );
+    case /^preset-25$/.test(presetId):
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 20V8m16 12V8M4 8h16M8 12h8M8 16h8" />
+        </svg>
+      );
+    case /^preset-03$/.test(presetId):
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="9" width="14" height="7" rx="2" />
+          <circle cx="7" cy="18" r="2" />
+          <circle cx="14" cy="18" r="2" />
+          <path d="M17 12h4l-2 4" />
+        </svg>
+      );
+    default:
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
+        </svg>
+      );
+  }
+}
+
+/* ---------------- Helpers ---------------- */
+
+function buildOverlayMapType(
+  maps: typeof google,
+  overlay: (typeof OVERLAY_SOURCES)[number],
+  date: string,
+  opacity: number,
+): google.maps.MapType | null {
+  if (overlay.kind === "none") return null;
+
+  const tileSize = new maps.maps.Size(256, 256);
+  const maxZoom = overlay.maxZoom;
+  const name = overlay.label;
+
+  return new maps.maps.ImageMapType({
+    name,
+    tileSize,
+    minZoom: 0,
+    maxZoom,
+    opacity,
+    getTileUrl: (coord, zoom) => {
+      if (zoom > maxZoom) return null;
+      const n = 1 << zoom;
+      if (coord.x < 0 || coord.x >= n) return null;
+      if (coord.y < 0 || coord.y >= n) return null;
+      return overlay.url
+        .replace("{z}", String(zoom))
+        .replace("{x}", String(coord.x))
+        .replace("{y}", String(coord.y))
+        .replace("{date}", date);
+    },
+  });
+}
+
+function formatGibsDate(date: Date): string {
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function formatHumanDate(value: string): string {
+  const date = new Date(value + "T00:00:00Z");
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function themeLabel(themeId: ThemeId): string {
+  switch (themeId) {
+    case "default":
+      return "Default";
+    case "silver":
+      return "Silver";
+    case "retro":
+      return "Retro";
+    case "dark":
+      return "Dark";
+    case "aubergine":
+      return "Aubergine";
+    case "night":
+      return "Night";
+  }
+}
+
+function haversineKm(a: LatLng, b: LatLng): number {
+  const R = 6371;
+  const toRad = (n: number) => (n * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
 }
 
 function MissingApiKey() {
@@ -1088,78 +1970,6 @@ function MissingApiKey() {
   );
 }
 
-function FeaturePanel({
-  selectedFeature,
-  streetViewState,
-}: {
-  selectedFeature: SelectedFeature;
-  streetViewState: StreetViewState;
-}) {
-  const tagRows = summarizeTags(selectedFeature.tags, 10);
-  const address = buildAddressFromTags(selectedFeature.tags);
-  const externalLinks = buildExternalLinks(selectedFeature.coordinate, address);
-
-  return (
-    <section className="feature-panel">
-      <p className="eyebrow">Selected feature</p>
-      <h2>{selectedFeature.name}</h2>
-      <dl className="feature-details">
-        <div>
-          <dt>OSM</dt>
-          <dd>
-            {selectedFeature.osmType ?? "feature"} {selectedFeature.osmId ?? ""}
-          </dd>
-        </div>
-        <div>
-          <dt>Coordinate</dt>
-          <dd>{formatCoordinate(selectedFeature.coordinate)}</dd>
-        </div>
-        {address ? (
-          <div>
-            <dt>Address</dt>
-            <dd>{address}</dd>
-          </div>
-        ) : null}
-        <div>
-          <dt>Match</dt>
-          <dd>
-            {selectedFeature.matchReason.label}
-            {selectedFeature.matchReason.distanceMeters !== undefined ? (
-              <span className="match-meta">
-                {formatMetersForUi(selectedFeature.matchReason.distanceMeters)}
-              </span>
-            ) : null}
-          </dd>
-        </div>
-      </dl>
-      {selectedFeature.matchReason.detail ? (
-        <p className="match-detail">{selectedFeature.matchReason.detail}</p>
-      ) : null}
-      <div className="external-links" aria-label="Open this location in external services">
-        {externalLinks.map((link) => (
-          <a
-            key={link.label}
-            href={link.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="external-link"
-          >
-            {link.label}
-          </a>
-        ))}
-      </div>
-      {tagRows.length > 0 ? (
-        <ul className="tag-list">
-          {tagRows.map((tag) => (
-            <li key={tag}>{tag}</li>
-          ))}
-        </ul>
-      ) : null}
-      <StreetViewStatus state={streetViewState} />
-    </section>
-  );
-}
-
 function buildAddressFromTags(tags: Record<string, string>): string | null {
   const housenumber = tags["addr:housenumber"]?.trim();
   const street = tags["addr:street"]?.trim();
@@ -1168,9 +1978,7 @@ function buildAddressFromTags(tags: Record<string, string>): string | null {
   const postcode = tags["addr:postcode"]?.trim();
   const fullAddress = tags["addr:full"]?.trim();
 
-  if (fullAddress) {
-    return fullAddress;
-  }
+  if (fullAddress) return fullAddress;
 
   const streetLine = [housenumber, street].filter(Boolean).join(" ");
   const cityLine = [city, state].filter(Boolean).join(", ");
@@ -1189,43 +1997,12 @@ function buildExternalLinks(
   const encoded = encodeURIComponent(query);
 
   return [
-    {
-      label: "Google Maps",
-      url: `https://www.google.com/maps/search/?api=1&query=${encoded}`,
-    },
-    {
-      label: "Zillow",
-      url: `https://www.zillow.com/homes/${encoded}_rb/`,
-    },
-    {
-      label: "Redfin",
-      url: `https://www.redfin.com/zipcode/?location=${encoded}`,
-    },
-    {
-      label: "Realtor.com",
-      url: `https://www.realtor.com/realestateandhomes-search/${encoded}`,
-    },
-    {
-      label: "LoopNet",
-      url: `https://www.loopnet.com/search/?sk=${encoded}`,
-    },
+    { label: "Google Maps", url: `https://www.google.com/maps/search/?api=1&query=${encoded}` },
+    { label: "Zillow", url: `https://www.zillow.com/homes/${encoded}_rb/` },
+    { label: "Redfin", url: `https://www.redfin.com/zipcode/?location=${encoded}` },
+    { label: "Realtor", url: `https://www.realtor.com/realestateandhomes-search/${encoded}` },
+    { label: "LoopNet", url: `https://www.loopnet.com/search/?sk=${encoded}` },
   ];
-}
-
-function StreetViewStatus({ state }: { state: StreetViewState }) {
-  if (state.status === "searching") {
-    return <p className="notice">Looking for nearby Street View...</p>;
-  }
-
-  if (state.status === "none" || state.status === "error") {
-    return <p className="notice warning">{state.message}</p>;
-  }
-
-  if (state.status === "open") {
-    return <p className="notice success">Street View found.</p>;
-  }
-
-  return null;
 }
 
 function validateSearchGate(
@@ -1246,18 +2023,13 @@ function validateSearchGate(
     }
     return null;
   }
-
   if (mode === "raw") {
-    if (zoom < 13) {
-      return "Zoom in to at least 13 before running a raw Overpass query.";
-    }
+    if (zoom < 13) return "Zoom in to at least 13 before running a raw Overpass query.";
     return null;
   }
-
   if (zoom < presetMinZoom) {
     return `Zoom in to at least ${presetMinZoom} before running this premade query.`;
   }
-
   return null;
 }
 
@@ -1294,17 +2066,12 @@ function computeDifficultyEstimate(
 ): DifficultyEstimate {
   const scope =
     visibleDiagonalKm === null
-      ? "Scope: waiting for map bounds."
-      : `Scope: about ${formatDistanceKm(visibleDiagonalKm)} across at zoom ${zoom}.`;
+      ? "Waiting for bounds"
+      : `${formatDistanceKm(visibleDiagonalKm)} across · zoom ${zoom}`;
 
   const gate = validateSearchGate(mode, zoom, tagFilter, preset.minZoom);
   if (gate) {
-    return {
-      level: "blocked",
-      label: "Zoom in",
-      detail: gate,
-      scope,
-    };
+    return { level: "blocked", label: "Zoom in", detail: gate, scope };
   }
 
   if (mode === "simple") {
@@ -1319,14 +2086,13 @@ function computeDifficultyEstimate(
         scope,
       };
     }
-
     const level = estimateSimpleLevel(parsed.wildcard, visibleDiagonalKm);
     return {
       level,
       label: labelForDifficulty(level),
       detail: parsed.wildcard
-        ? "Wildcard tag searches ask Overpass for every feature with that key, so zoom and map scope matter a lot."
-        : "Direct key=value searches are usually manageable when the visible area is tight.",
+        ? "Wildcard tag searches scan every feature with that key."
+        : "Direct key=value searches are usually manageable.",
       scope,
     };
   }
@@ -1334,13 +2100,12 @@ function computeDifficultyEstimate(
   if (mode === "raw") {
     const hasBboxMacro = rawQuery.includes("{{bbox}}");
     const level = estimateRawLevel(hasBboxMacro, visibleDiagonalKm);
-
     return {
       level,
       label: labelForDifficulty(level),
       detail: hasBboxMacro
-        ? "Raw QL will run exactly as pasted, with {{bbox}} replaced by the current map bounds."
-        : "Raw QL has no {{bbox}} macro, so it may ignore the current map scope and run broad.",
+        ? "Raw QL with {{bbox}} scoped to current map."
+        : "No {{bbox}} macro — query may ignore current view.",
       scope,
     };
   }
@@ -1351,33 +2116,30 @@ function computeDifficultyEstimate(
     label: labelForDifficulty(level),
     detail:
       preset.id === "preset-11"
-        ? "This preset is the heaviest option because it scans pedestrian ways, roads, and endpoint proximity."
-        : "Premade scouting queries scan multiple OSM tags and may run spatial filters after Overpass returns data.",
+        ? "Heavy preset — endpoints + trails."
+        : "Premade scouting query.",
     scope,
   };
 }
 
 function prepareRawOverpassQuery(rawQuery: string, bbox: BBox): string {
   const trimmed = rawQuery.trim();
-
-  if (!trimmed) {
-    throw new Error("Paste an Overpass QL query before searching.");
-  }
-
+  if (!trimmed) throw new Error("Paste an Overpass QL query before searching.");
   if (!trimmed.includes("[out:json")) {
     throw new Error("Raw queries must request JSON output, for example [out:json][timeout:25];");
   }
-
   const bboxText = [
     bbox.south.toFixed(7),
     bbox.west.toFixed(7),
     bbox.north.toFixed(7),
     bbox.east.toFixed(7),
   ].join(",");
-
   return trimmed
     .replace(/\{\{\s*bbox\s*\}\}/gi, bboxText)
-    .replace(/\{\{\s*center\s*\}\}/gi, `${((bbox.south + bbox.north) / 2).toFixed(7)},${((bbox.west + bbox.east) / 2).toFixed(7)}`)
+    .replace(
+      /\{\{\s*center\s*\}\}/gi,
+      `${((bbox.south + bbox.north) / 2).toFixed(7)},${((bbox.west + bbox.east) / 2).toFixed(7)}`,
+    )
     .replace(/\{\{\s*style:[\s\S]*?\}\}/gi, "")
     .replace(/\{\{\s*style\s*\}\}/gi, "");
 }
@@ -1386,17 +2148,13 @@ function estimateSimpleLevel(
   wildcard: boolean,
   visibleDiagonalKm: number | null,
 ): DifficultyLevel {
-  if (visibleDiagonalKm === null) {
-    return wildcard ? "high" : "moderate";
-  }
-
+  if (visibleDiagonalKm === null) return wildcard ? "high" : "moderate";
   if (wildcard) {
     if (visibleDiagonalKm > 6) return "very-high";
     if (visibleDiagonalKm > 3) return "high";
     if (visibleDiagonalKm > 1.5) return "moderate";
     return "low";
   }
-
   if (visibleDiagonalKm > 10) return "high";
   if (visibleDiagonalKm > 5) return "moderate";
   return "low";
@@ -1406,10 +2164,7 @@ function estimatePresetLevel(
   presetId: PresetId,
   visibleDiagonalKm: number | null,
 ): DifficultyLevel {
-  if (visibleDiagonalKm === null) {
-    return "high";
-  }
-
+  if (visibleDiagonalKm === null) return "high";
   if (
     presetId === "preset-11" ||
     presetId === "preset-27" ||
@@ -1420,7 +2175,6 @@ function estimatePresetLevel(
     if (visibleDiagonalKm > 1.2) return "high";
     return "moderate";
   }
-
   if (visibleDiagonalKm > 5) return "very-high";
   if (visibleDiagonalKm > 2.5) return "high";
   if (visibleDiagonalKm > 1.2) return "moderate";
@@ -1431,10 +2185,7 @@ function estimateRawLevel(
   hasBboxMacro: boolean,
   visibleDiagonalKm: number | null,
 ): DifficultyLevel {
-  if (!hasBboxMacro) {
-    return "very-high";
-  }
-
+  if (!hasBboxMacro) return "very-high";
   if (visibleDiagonalKm === null) return "high";
   if (visibleDiagonalKm > 8) return "very-high";
   if (visibleDiagonalKm > 4) return "high";
@@ -1458,10 +2209,7 @@ function labelForDifficulty(level: DifficultyLevel): string {
 }
 
 function formatDistanceKm(distanceKm: number): string {
-  if (distanceKm < 1) {
-    return `${Math.round(distanceKm * 1000)} m`;
-  }
-
+  if (distanceKm < 1) return `${Math.round(distanceKm * 1000)} m`;
   return `${distanceKm.toFixed(distanceKm < 10 ? 1 : 0)} km`;
 }
 
@@ -1480,21 +2228,14 @@ function normalizeMapTypeId(mapTypeId: string | undefined): MapDisplayType {
   ) {
     return mapTypeId;
   }
-
   return "roadmap";
 }
 
 function getCurrentMapBBox(map: google.maps.Map): BBox | null {
   const bounds = map.getBounds();
-  if (bounds) {
-    return googleBoundsToBBox(bounds);
-  }
-
+  if (bounds) return googleBoundsToBBox(bounds);
   const center = map.getCenter();
-  if (!center) {
-    return null;
-  }
-
+  if (!center) return null;
   const mapDiv = map.getDiv();
   return approximateBBoxFromCenter(
     { lat: center.lat(), lng: center.lng() },
@@ -1544,21 +2285,13 @@ function mapBoundsWarning(
 ): string | null {
   const bbox = getCurrentMapBBox(map);
   const zoom = map.getZoom() ?? 0;
-
-  if (!bbox) {
-    return null;
-  }
-
+  if (!bbox) return null;
   const gate = validateSearchGate(mode, zoom, tagFilter, presetMinZoom);
-  if (gate) {
-    return gate;
-  }
-
+  if (gate) return gate;
   const diagonalKm = bboxDiagonalKm(bbox);
   if (diagonalKm > (mode === "preset" ? 4 : 8)) {
     return "Large visible area. Searches may be slow; zoom in for cleaner results.";
   }
-
   return null;
 }
 
@@ -1569,7 +2302,7 @@ function styleForDataFeature(
   const role = readDataString(feature, "scoutRole", "result") as ScoutRole;
   const category = readDataString(feature, "scoutCategory", "simple") as ScoutCategory;
   const selected = Boolean(feature.getProperty("scoutSelected"));
-  const color = selected ? "#e03131" : colorForCategory(category, role);
+  const color = selected ? "#1a73e8" : colorForCategory(category, role);
   const isContext = role.startsWith("context");
   const geometryType = feature.getGeometry()?.getType();
 
@@ -1581,7 +2314,7 @@ function styleForDataFeature(
         scale: selected ? 8 : isContext ? 4 : 6,
         fillColor: color,
         fillOpacity: isContext ? 0.72 : 0.96,
-        strokeColor: selected ? "#ffffff" : "#172033",
+        strokeColor: selected ? "#ffffff" : "#202124",
         strokeWeight: selected ? 3 : 1,
       },
       zIndex: selected ? 1000 : isContext ? 10 : 100,
@@ -1607,46 +2340,46 @@ function styleForDataFeature(
 }
 
 function colorForCategory(category: ScoutCategory, role: ScoutRole): string {
-  if (role === "context-building") return "#7a7f87";
-  if (role === "context-water") return "#228be6";
-  if (role === "context-road") return "#4c6ef5";
-  if (role === "context-parking") return "#845ef7";
-  if (role === "context-woods") return "#2b8a3e";
-  if (role === "context-park") return "#40c057";
-  if (role === "context-pull-off") return "#7950f2";
-  if (role === "context-trail") return "#37b24d";
-  if (role === "context-industrial") return "#868e96";
+  if (role === "context-building") return "#9aa0a6";
+  if (role === "context-water") return "#4285f4";
+  if (role === "context-road") return "#5f6368";
+  if (role === "context-parking") return "#8430ce";
+  if (role === "context-woods") return "#137333";
+  if (role === "context-park") return "#0f9d58";
+  if (role === "context-pull-off") return "#a142f4";
+  if (role === "context-trail") return "#34a853";
+  if (role === "context-industrial") return "#9aa0a6";
 
   switch (category) {
     case "road":
-      return "#4c6ef5";
+      return "#5f6368";
     case "parking":
-      return "#845ef7";
+      return "#a142f4";
     case "trail":
-      return "#2f9e44";
+      return "#34a853";
     case "bridge":
-      return "#f08c00";
+      return "#fa7b17";
     case "water":
-      return "#228be6";
+      return "#4285f4";
     case "building":
-      return "#7a7f87";
+      return "#9aa0a6";
     case "water-crossing":
-      return "#0ca678";
+      return "#129eaf";
     case "woods":
-      return "#2b8a3e";
+      return "#137333";
     case "park":
-      return "#40c057";
+      return "#0f9d58";
     case "pull-off":
-      return "#7950f2";
+      return "#8430ce";
     case "barrier":
-      return "#c92a2a";
+      return "#d93025";
     case "industrial":
-      return "#868e96";
+      return "#80868b";
     case "off-road":
-      return "#7048e8";
+      return "#673ab7";
     case "simple":
     default:
-      return "#d6336c";
+      return "#e52592";
   }
 }
 

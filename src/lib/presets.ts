@@ -4,6 +4,7 @@ import { bboxToOverpass } from "./geo";
 export interface PresetQueryOptions {
   includeBuildings: boolean;
   includeWater: boolean;
+  bufferScale?: number;
 }
 
 export const PRESETS: PresetDefinition[] = [
@@ -56,11 +57,12 @@ export function buildPresetOverpassQuery(
   bbox: BBox,
   options: PresetQueryOptions,
 ): string {
+  const scale = Math.max(0.25, Math.min(3, options.bufferScale ?? 1));
   const boxes = {
     bbox: bboxToOverpass(bbox),
-    bbox100ft: bboxToOverpass(expandBBox(bbox, 30.48)),
-    bbox60m: bboxToOverpass(expandBBox(bbox, 60)),
-    bbox100m: bboxToOverpass(expandBBox(bbox, 100)),
+    bbox100ft: bboxToOverpass(expandBBox(bbox, 30.48 * scale)),
+    bbox60m: bboxToOverpass(expandBBox(bbox, 60 * scale)),
+    bbox100m: bboxToOverpass(expandBBox(bbox, 100 * scale)),
   };
   const clauses = presetClauses(presetDefinition.id, boxes);
 

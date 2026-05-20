@@ -2,6 +2,7 @@ import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import centroid from "@turf/centroid";
 import distance from "@turf/distance";
 import { lineString, point } from "@turf/helpers";
+import lineIntersect from "@turf/line-intersect";
 import pointToLineDistance from "@turf/point-to-line-distance";
 import type {
   Feature,
@@ -228,14 +229,17 @@ export function applyPresetSpatialFilters(
       addContexts(contextFeatures, context.water, "context-water", "water", "Water context");
       for (const road of context.roads) {
         if (isClearlyPrivate(road)) continue;
-        const water = nearestFeatureDistance(road, context.water, WATER_ADJACENT_DISTANCE_METERS);
-        if (water.distanceMeters <= WATER_ADJACENT_DISTANCE_METERS) {
+        const clipped = clipRoadToPredicate(road, (sample) =>
+          nearestDistanceToFeatures(sample, context.water, WATER_ADJACENT_DISTANCE_METERS)
+            .distanceMeters <= WATER_ADJACENT_DISTANCE_METERS,
+        );
+        if (clipped) {
           addResult(
-            road,
+            clipped.feature,
             "road",
-            "Water-adjacent road",
-            water.distanceMeters,
-            `Nearest mapped water: ${formatMeters(water.distanceMeters)}. ${tagDetail(getFeatureTags(road), ["highway", "name", "access"])}`,
+            "Water-adjacent road (localized)",
+            0,
+            `Water-adjacent run: ${formatMeters(clipped.lengthMeters)} across ${clipped.spans} span(s). ${tagDetail(getFeatureTags(road), ["highway", "name", "access"])}`,
           );
         }
       }
@@ -493,24 +497,29 @@ export function applyPresetSpatialFilters(
       }
       break;
 
-    case "preset-19":
+    case "preset-19": {
+      const woodsCoverMeters = 25;
       addContexts(contextFeatures, [...context.trees, ...context.woods], "context-woods", "woods", "Tree/woods context");
       for (const parking of [...context.parking, ...context.pullOffs]) {
         if (isClearlyPrivate(parking)) continue;
         const tree = nearestFeatureDistance(parking, context.trees, TREE_CONTEXT_DISTANCE_METERS);
-        const woods = nearestFeatureDistance(parking, context.woods, NEAR_WATER_DISTANCE_METERS);
-        const best = Math.min(tree.distanceMeters, woods.distanceMeters);
-        if (best <= (tree.distanceMeters <= TREE_CONTEXT_DISTANCE_METERS ? TREE_CONTEXT_DISTANCE_METERS : NEAR_WATER_DISTANCE_METERS)) {
+        const woods = nearestFeatureDistance(parking, context.woods, woodsCoverMeters);
+        const treeMatch = tree.distanceMeters <= TREE_CONTEXT_DISTANCE_METERS;
+        const woodsMatch = woods.distanceMeters <= woodsCoverMeters;
+        if (treeMatch || woodsMatch) {
+          const distance = Math.min(tree.distanceMeters, woods.distanceMeters);
+          const evidence = treeMatch ? "Tree/tree_row evidence" : "Woods/forest evidence";
           addResult(
             parking,
             isPullOffFeature(parking) ? "pull-off" : "parking",
             "Tree-covered parking or pull-off",
-            best,
-            `${tree.distanceMeters <= TREE_CONTEXT_DISTANCE_METERS ? "Tree/tree_row evidence" : "Woods/forest evidence"} within ${formatMeters(best)}. ${tagDetail(getFeatureTags(parking), ["amenity", "parking", "highway", "access"])}`,
+            distance,
+            `${evidence} within ${formatMeters(distance)}. ${tagDetail(getFeatureTags(parking), ["amenity", "parking", "highway", "access"])}`,
           );
         }
       }
       break;
+    }
 
     case "preset-20":
       for (const pullOff of [...context.pullOffs, ...context.roads.filter((feature) => isStreetParkingLegalish(getFeatureTags(feature)))]) {
@@ -717,14 +726,14 @@ export function applyPresetSpatialFilters(
       addContexts(contextFeatures, context.roads, "context-road", "road", "Road context");
       for (const trail of context.trails.filter(isNamedTrailFeature)) {
         if (isClearlyPrivate(trail)) continue;
-        const road = nearestFeatureDistance(trail, context.roads, 10);
-        if (road.distanceMeters <= 10) {
+        const crossings = countTrailRoadIntersections(trail, context.roads);
+        if (crossings > 0) {
           addResult(
             trail,
             "trail",
-            "Named trail crossing or meeting a road",
-            road.distanceMeters,
-            `Road crossing/meeting distance: ${formatMeters(road.distanceMeters)}. ${tagDetail(getFeatureTags(trail), ["name", "route", "highway", "access"])}`,
+            "Named trail crossing a road",
+            0,
+            `Road intersections: ${crossings}. ${tagDetail(getFeatureTags(trail), ["name", "route", "highway", "access"])}`,
           );
         }
       }
@@ -752,15 +761,28 @@ export function applyPresetSpatialFilters(
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isLowSpeedRoad(tags) || isClearlyPrivate(road)) continue;
-        const evidence = treeEvidence(road, context);
         const building = nearestFeatureDistance(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
-        if (evidence.matched && building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+        if (building.distanceMeters <= NO_BUILDINGS_DISTANCE_METERS) continue;
+
+        if (tags.tree_lined && tags.tree_lined !== "no") {
           addResult(
             road,
             "road",
             "Low-speed tree-lined road with no mapped buildings nearby",
             finiteDistance(building.distanceMeters),
-            `${evidence.detail} Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(tags, ["maxspeed", "tree_lined", "highway", "access"])}`,
+            `Direct tree_lined=${tags.tree_lined}. Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(tags, ["maxspeed", "tree_lined", "highway", "access"])}`,
+          );
+          continue;
+        }
+
+        const runMeters = treeLinedRunMeters(road, context);
+        if (runMeters >= TREE_LINED_REQUIRED_METERS) {
+          addResult(
+            road,
+            "road",
+            "Low-speed tree-lined road with no mapped buildings nearby",
+            finiteDistance(building.distanceMeters),
+            `Tree-lined run: ${formatMeters(runMeters)} (>= ${formatMeters(TREE_LINED_REQUIRED_METERS)}). Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(tags, ["maxspeed", "tree_lined", "highway", "access"])}`,
           );
         }
       }
@@ -1430,6 +1452,30 @@ function extractLineStrings(geometry: Geometry): Position[][] {
   return [];
 }
 
+function countTrailRoadIntersections(
+  trail: GeoJSONFeature,
+  roads: GeoJSONFeature[],
+): number {
+  const trailLines = extractLineStrings(trail.geometry);
+  if (trailLines.length === 0) return 0;
+
+  const trailId = getOsmId(trail);
+  let total = 0;
+  for (const road of roads) {
+    if (trailId !== undefined && getOsmId(road) === trailId) continue;
+    const roadLines = extractLineStrings(road.geometry);
+    for (const trailLine of trailLines) {
+      if (trailLine.length < 2) continue;
+      for (const roadLine of roadLines) {
+        if (roadLine.length < 2) continue;
+        const intersections = lineIntersect(lineString(trailLine), lineString(roadLine));
+        total += intersections.features.length;
+      }
+    }
+  }
+  return total;
+}
+
 function sampleLineAtInterval(line: Position[], stepMeters: number): LatLng[] {
   const samples: LatLng[] = [];
   if (line.length === 0) return samples;
@@ -1451,6 +1497,61 @@ function sampleLineAtInterval(line: Position[], stepMeters: number): LatLng[] {
     cumulative += segMeters;
   }
   return samples;
+}
+
+export interface ClippedRoad {
+  feature: GeoJSONFeature;
+  spans: number;
+  lengthMeters: number;
+}
+
+export function clipRoadToPredicate(
+  road: GeoJSONFeature,
+  predicate: (sample: LatLng) => boolean,
+  stepMeters: number = 10,
+): ClippedRoad | null {
+  const lines = extractLineStrings(road.geometry);
+  if (lines.length === 0) return null;
+
+  const passingLines: Position[][] = [];
+  for (const line of lines) {
+    const samples = sampleLineAtInterval(line, stepMeters);
+    let currentRun: Position[] = [];
+    for (const sample of samples) {
+      if (predicate(sample)) {
+        currentRun.push([sample.lng, sample.lat]);
+      } else {
+        if (currentRun.length >= 2) passingLines.push(currentRun);
+        currentRun = [];
+      }
+    }
+    if (currentRun.length >= 2) passingLines.push(currentRun);
+  }
+
+  if (passingLines.length === 0) return null;
+
+  const totalMeters = passingLines.reduce((sum, line) => sum + lineLengthMeters(line), 0);
+  const geometry: Geometry =
+    passingLines.length === 1
+      ? { type: "LineString", coordinates: passingLines[0] }
+      : { type: "MultiLineString", coordinates: passingLines };
+
+  return {
+    feature: {
+      ...road,
+      geometry,
+    },
+    spans: passingLines.length,
+    lengthMeters: totalMeters,
+  };
+}
+
+function lineLengthMeters(positions: Position[]): number {
+  let total = 0;
+  for (let i = 0; i < positions.length - 1; i++) {
+    total += distance(positions[i], positions[i + 1], { units: "kilometers" }) * 1000;
+  }
+  return total;
 }
 
 function treeEvidence(
