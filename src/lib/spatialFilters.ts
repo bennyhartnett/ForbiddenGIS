@@ -333,29 +333,31 @@ export function applyPresetSpatialFilters(
       }
       break;
 
-    case "preset-11":
+    case "preset-11": {
       addContexts(contextFeatures, context.roads, "context-road", "road", "Road context");
       addContexts(contextFeatures, context.trails, "context-trail", "trail", "Trail context");
+      const deadEnds = deadEndCandidates(context);
       for (const trail of context.trails.filter((feature) => isWalkingPathFeature(feature))) {
         if (isClearlyPrivate(trail) || allowsMotorVehicles(getFeatureTags(trail))) continue;
         const metrics = pathConnectionMetrics(
           trail,
-          deadEndCandidates(context),
-          context.roads,
+          deadEnds,
+          deadEnds,
           DEAD_END_TO_TRAIL_DISTANCE_METERS,
-          55,
+          DEAD_END_TO_TRAIL_DISTANCE_METERS,
         );
         if (metrics.connected) {
           addResult(
             trail,
             "trail",
-            "Road-to-road dead ends connected by walking trail",
+            "Walking trail connecting two dead ends",
             metrics.distanceMeters,
-            `Dead-end/road endpoint proximity: ${formatMeters(metrics.distanceMeters)}. ${tagDetail(getFeatureTags(trail), ["highway", "foot", "access", "name"])}`,
+            `Dead-end endpoint proximity: ${formatMeters(metrics.distanceMeters)}. ${tagDetail(getFeatureTags(trail), ["highway", "foot", "access", "name"])}`,
           );
         }
       }
       break;
+    }
 
     case "preset-12":
       addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
@@ -380,14 +382,26 @@ export function applyPresetSpatialFilters(
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isSpecificMph(tags, 25) || isClearlyPrivate(road)) continue;
-        const evidence = treeEvidence(road, context);
-        if (evidence.matched) {
+
+        if (tags.tree_lined && tags.tree_lined !== "no") {
           addResult(
             road,
             "road",
             "25 mph tree-lined road",
-            finiteDistance(evidence.distanceMeters),
-            `${evidence.detail} ${tagDetail(tags, ["highway", "maxspeed", "tree_lined", "access"])}`,
+            0,
+            `Direct tree_lined=${tags.tree_lined}. ${tagDetail(tags, ["highway", "maxspeed", "tree_lined", "access"])}`,
+          );
+          continue;
+        }
+
+        const runMeters = treeLinedRunMeters(road, context);
+        if (runMeters >= TREE_LINED_REQUIRED_METERS) {
+          addResult(
+            road,
+            "road",
+            "25 mph tree-lined road",
+            undefined,
+            `Tree-lined run: ${formatMeters(runMeters)} (>= ${formatMeters(TREE_LINED_REQUIRED_METERS)}). ${tagDetail(tags, ["highway", "maxspeed", "tree_lined", "access"])}`,
           );
         }
       }
@@ -592,16 +606,16 @@ export function applyPresetSpatialFilters(
 
     case "preset-26":
       addContexts(contextFeatures, context.parking, "context-parking", "parking", "Parking context");
-      for (const trailish of [...context.trailheads, ...context.trails]) {
-        if (isClearlyPrivate(trailish)) continue;
-        const parking = nearestFeatureDistance(trailish, context.parking, TRAIL_TO_PARKING_DISTANCE_METERS);
+      for (const trailhead of context.trailheads) {
+        if (isClearlyPrivate(trailhead)) continue;
+        const parking = nearestFeatureDistance(trailhead, context.parking, TRAIL_TO_PARKING_DISTANCE_METERS);
         if (parking.distanceMeters <= TRAIL_TO_PARKING_DISTANCE_METERS) {
           addResult(
-            trailish,
-            isTrailheadFeature(trailish) ? "trail" : "trail",
-            "Public trailhead or trail near parking",
+            trailhead,
+            "trail",
+            "Public trailhead near parking",
             parking.distanceMeters,
-            `Parking distance: ${formatMeters(parking.distanceMeters)}. ${tagDetail(getFeatureTags(trailish), ["tourism", "highway", "name", "access"])}`,
+            `Parking distance: ${formatMeters(parking.distanceMeters)}. ${tagDetail(getFeatureTags(trailhead), ["tourism", "highway", "name", "access"])}`,
           );
         }
       }
@@ -667,7 +681,7 @@ export function applyPresetSpatialFilters(
       addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
-        if (!isLikelyQuietRoad(tags) || (!isNoSidewalkRoad(tags) && !isLowSpeedRoad(tags)) || isClearlyPrivate(road)) continue;
+        if (!isLikelyQuietRoad(tags) || !isNoSidewalkRoad(tags) || isClearlyPrivate(road)) continue;
         const buildingCount = countFeaturesWithin(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
         if (buildingCount <= 1) {
           addResult(
@@ -1383,6 +1397,60 @@ function flattenPositions(geometry: Geometry): Position[] {
     case "GeometryCollection":
       return geometry.geometries.flatMap(flattenPositions);
   }
+}
+
+function treeLinedRunMeters(road: GeoJSONFeature, context: SpatialContext): number {
+  const stepMeters = 5;
+  const lateralBuffer = TREE_CONTEXT_DISTANCE_METERS;
+  const lines = extractLineStrings(road.geometry);
+  if (lines.length === 0) return 0;
+
+  const treeFeatures = [...context.trees, ...context.woods];
+  if (treeFeatures.length === 0) return 0;
+
+  let longestRun = 0;
+  for (const line of lines) {
+    let currentRun = 0;
+    for (const sample of sampleLineAtInterval(line, stepMeters)) {
+      const nearest = nearestDistanceToFeatures(sample, treeFeatures, lateralBuffer);
+      if (nearest.distanceMeters <= lateralBuffer) {
+        currentRun += stepMeters;
+        if (currentRun > longestRun) longestRun = currentRun;
+      } else {
+        currentRun = 0;
+      }
+    }
+  }
+  return longestRun;
+}
+
+function extractLineStrings(geometry: Geometry): Position[][] {
+  if (geometry.type === "LineString") return [geometry.coordinates];
+  if (geometry.type === "MultiLineString") return geometry.coordinates;
+  return [];
+}
+
+function sampleLineAtInterval(line: Position[], stepMeters: number): LatLng[] {
+  const samples: LatLng[] = [];
+  if (line.length === 0) return samples;
+  samples.push({ lat: line[0][1], lng: line[0][0] });
+  if (line.length < 2) return samples;
+
+  let nextSampleAt = stepMeters;
+  let cumulative = 0;
+  for (let i = 0; i < line.length - 1; i++) {
+    const a = line[i];
+    const b = line[i + 1];
+    const segMeters = distance(a, b, { units: "kilometers" }) * 1000;
+    if (segMeters === 0) continue;
+    while (nextSampleAt <= cumulative + segMeters) {
+      const t = (nextSampleAt - cumulative) / segMeters;
+      samples.push({ lat: a[1] + (b[1] - a[1]) * t, lng: a[0] + (b[0] - a[0]) * t });
+      nextSampleAt += stepMeters;
+    }
+    cumulative += segMeters;
+  }
+  return samples;
 }
 
 function treeEvidence(
