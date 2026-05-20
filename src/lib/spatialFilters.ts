@@ -94,7 +94,6 @@ const UNPAVED_SURFACES = new Set([
   "grass",
   "mud",
 ]);
-const DIRT_SURFACES = new Set(["dirt", "earth", "ground", "mud"]);
 const TRACK_PAVED_SURFACES = new Set([
   "asphalt",
   "paved",
@@ -898,8 +897,9 @@ export function isShoulderedRoad(tags: Record<string, string>): boolean {
 
 export function isDirtRoad(tags: Record<string, string>): boolean {
   const surface = tags.surface?.toLowerCase();
-  if (surface !== undefined && DIRT_SURFACES.has(surface)) return true;
+  if (surface !== undefined && UNPAVED_SURFACES.has(surface)) return true;
   if (tags.highway === "track") {
+    if (tags.tracktype) return true;
     return surface === undefined || !TRACK_PAVED_SURFACES.has(surface);
   }
   return false;

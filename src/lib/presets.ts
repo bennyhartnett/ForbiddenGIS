@@ -8,7 +8,7 @@ export interface PresetQueryOptions {
 }
 
 export const PRESETS: PresetDefinition[] = [
-  preset("preset-dirt-roads", "Dirt roads", "Roads with explicit dirt, earth, ground, or mud surfaces.", 14, false, false, false),
+  preset("preset-dirt-roads", "Dirt / gravel / unpaved roads", "Roads and tracks with unpaved surfaces (gravel, dirt, sand, grass, etc.) or any tracktype grade.", 14, false, false, false),
   preset("preset-alleys", "Alleys", "Service alleys (highway=service, service=alley) and explicit alley ways.", 14, false, false, false),
   preset("preset-01", "Off-Roading Legal", "Public-ish tracks and rough roads without private/no access tags.", 14, true, true, false),
   preset("preset-02", "Off-Roading Private", "Tracks, rough roads, and service ways that are tagged restricted or private.", 14, true, true, false),
@@ -194,7 +194,8 @@ function roadClauses(bbox: string): string[] {
 
 function dirtRoadClauses(bbox: string): string[] {
   return [
-    `way["highway"~"^(unclassified|residential|service|living_street|tertiary|secondary|primary|track)$"]["surface"~"^(dirt|earth|ground|mud)$"](${bbox});`,
+    `way["highway"]["surface"~"^(gravel|fine_gravel|dirt|earth|ground|unpaved|compacted|sand|mud|grass)$"](${bbox});`,
+    `way["highway"="track"]["tracktype"~"^(grade1|grade2|grade3|grade4|grade5)$"](${bbox});`,
     `way["highway"="track"]["surface"!~"^(asphalt|paved|concrete|paving_stones|chipseal|metal|wood)$"](${bbox});`,
   ];
 }
