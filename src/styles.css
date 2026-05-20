@@ -1481,6 +1481,251 @@ p {
   color: var(--ink-soft);
 }
 
+/* ---- Match browse chip + list panel ---- */
+
+.match-browse-chip {
+  position: absolute;
+  right: 16px;
+  bottom: 200px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--primary-ink);
+  font-weight: 500;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.match-browse-chip:hover {
+  background: var(--surface-2);
+}
+
+.match-browse-chip svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.match-list-panel {
+  position: absolute;
+  right: 16px;
+  top: 80px;
+  z-index: 6;
+  width: min(320px, calc(100vw - 32px));
+  max-height: calc(100vh - 120px);
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: var(--shadow-2);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.match-list-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.match-list-header h2 {
+  font-size: 0.95rem;
+  font-weight: 500;
+  margin: 0;
+}
+
+.match-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.match-list-actions .icon-button,
+.match-list-actions .panel-toggle {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  padding: 0;
+  cursor: pointer;
+}
+
+.match-list-actions .icon-button:hover,
+.match-list-actions .panel-toggle:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.match-list-actions .icon-button[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.match-list-actions svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.match-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 8px 10px;
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+}
+
+.match-list-item {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  align-items: start;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--ink-soft);
+}
+
+.match-list-item:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.match-list-item.is-selected {
+  background: var(--primary-soft);
+  border-color: var(--primary-soft);
+  color: var(--primary-ink);
+}
+
+.match-list-index {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.match-list-item.is-selected .match-list-index {
+  background: var(--surface);
+  color: var(--primary-ink);
+}
+
+.match-list-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.match-list-name {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.match-list-meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.match-list-item.is-selected .match-list-meta {
+  color: var(--primary-ink);
+  opacity: 0.85;
+}
+
+.match-list-coord {
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Feature card cycle controls ---- */
+
+.feature-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.feature-card-cycle {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.feature-card-cycle .icon-button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: var(--surface);
+  color: var(--ink-soft);
+  padding: 0;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.feature-card-cycle .icon-button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.feature-card-cycle .icon-button + .icon-button {
+  border-left: 1px solid var(--line);
+}
+
+.feature-card-cycle svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.match-position {
+  color: var(--muted);
+  font-weight: 400;
+}
+
 /* ---- Notices ---- */
 
 .toast-stack {
@@ -1681,6 +1926,20 @@ p {
   .map-controls {
     right: 8px;
     bottom: 16px;
+  }
+
+  .match-browse-chip {
+    right: 8px;
+    bottom: 180px;
+  }
+
+  .match-list-panel {
+    right: 8px;
+    left: 8px;
+    width: auto;
+    top: auto;
+    bottom: 16px;
+    max-height: 60vh;
   }
 
   .street-view-panel {
