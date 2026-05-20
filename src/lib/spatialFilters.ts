@@ -113,6 +113,39 @@ const ROUGH_SMOOTHNESS = new Set([
   "very_horrible",
   "impassable",
 ]);
+const CAR_DRIVABLE_HIGHWAYS = new Set([
+  "motorway",
+  "trunk",
+  "primary",
+  "secondary",
+  "tertiary",
+  "unclassified",
+  "residential",
+  "service",
+  "living_street",
+  "track",
+]);
+const CAR_UNDRIVABLE_SURFACES = new Set([
+  "mud",
+  "sand",
+  "grass",
+  "earth",
+  "ground",
+  "rock",
+  "pebblestone",
+  "stepping_stones",
+  "snow",
+  "ice",
+]);
+const CAR_UNDRIVABLE_TRACKTYPES = new Set(["grade4", "grade5"]);
+const CAR_UNDRIVABLE_SMOOTHNESS = new Set([
+  "bad",
+  "very_bad",
+  "horrible",
+  "very_horrible",
+  "impassable",
+]);
+const CAR_FORBIDDEN_ACCESS = new Set(["no", "private", "customers", "permit", "agricultural", "forestry"]);
 const BARRIER_VALUES = new Set([
   "gate",
   "chain",
@@ -195,6 +228,7 @@ export function applyPresetSpatialFilters(
       for (const feature of features) {
         const tags = getFeatureTags(feature);
         if (!tags.highway || !isDirtRoad(tags)) continue;
+        if (!isCarDrivable(tags)) continue;
         addResult(
           feature,
           "off-road",
@@ -941,6 +975,30 @@ export function isDirtRoad(tags: Record<string, string>): boolean {
     return surface === undefined || !TRACK_PAVED_SURFACES.has(surface);
   }
   return false;
+}
+
+export function isCarDrivable(tags: Record<string, string>): boolean {
+  const highway = tags.highway?.toLowerCase();
+  if (!highway || !CAR_DRIVABLE_HIGHWAYS.has(highway)) return false;
+
+  if (tags["4wd_only"]?.toLowerCase() === "yes") return false;
+  if (tags.hgv?.toLowerCase() === "only") return false;
+
+  for (const key of ["motor_vehicle", "motorcar", "vehicle"]) {
+    const value = tags[key]?.toLowerCase();
+    if (value && CAR_FORBIDDEN_ACCESS.has(value)) return false;
+  }
+
+  const tracktype = tags.tracktype?.toLowerCase();
+  if (tracktype && CAR_UNDRIVABLE_TRACKTYPES.has(tracktype)) return false;
+
+  const smoothness = tags.smoothness?.toLowerCase();
+  if (smoothness && CAR_UNDRIVABLE_SMOOTHNESS.has(smoothness)) return false;
+
+  const surface = tags.surface?.toLowerCase();
+  if (surface && CAR_UNDRIVABLE_SURFACES.has(surface)) return false;
+
+  return true;
 }
 
 export function isAlley(tags: Record<string, string>): boolean {

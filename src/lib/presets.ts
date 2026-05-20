@@ -8,7 +8,7 @@ export interface PresetQueryOptions {
 }
 
 export const PRESETS: PresetDefinition[] = [
-  preset("preset-dirt-roads", "Dirt / gravel / unpaved roads", "Roads and tracks with unpaved surfaces — gravel, dirt, sand, grass, or graded tracks.", 14, false, false, false),
+  preset("preset-dirt-roads", "Dirt / gravel / unpaved roads", "Unpaved roads and tracks drivable by a regular car — gravel, dirt, or compacted surfaces. Excludes high-clearance/4x4-only routes, paths and bridleways.", 14, false, false, false),
   preset("preset-alleys", "Alleys", "Service alleys and back-lot routes between buildings.", 14, false, false, false),
   preset("preset-01", "Off-Roading Legal", "Public-ish tracks and rough roads without private/no access tags.", 14, true, true, false),
   preset("preset-02", "Off-Roading Private", "Tracks, rough roads, and service ways that are tagged restricted or private.", 14, true, true, false),
@@ -196,10 +196,13 @@ function roadClauses(bbox: string): string[] {
 }
 
 function dirtRoadClauses(bbox: string): string[] {
+  const drivableHighway = `^(unclassified|residential|service|living_street|tertiary|secondary|track)$`;
+  const carSurfaces = `^(gravel|fine_gravel|dirt|unpaved|compacted)$`;
+  const undrivableTracktype = `^(grade4|grade5)$`;
+  const undrivableSmoothness = `^(bad|very_bad|horrible|very_horrible|impassable)$`;
   return [
-    `way["highway"]["surface"~"^(gravel|fine_gravel|dirt|earth|ground|unpaved|compacted|sand|mud|grass)$"](${bbox});`,
-    `way["highway"="track"]["tracktype"~"^(grade1|grade2|grade3|grade4|grade5)$"](${bbox});`,
-    `way["highway"="track"]["surface"!~"^(asphalt|paved|concrete|paving_stones|chipseal|metal|wood)$"](${bbox});`,
+    `way["highway"~"${drivableHighway}"]["surface"~"${carSurfaces}"]["tracktype"!~"${undrivableTracktype}"]["smoothness"!~"${undrivableSmoothness}"]["motor_vehicle"!~"^(no|private)$"]["motorcar"!~"^(no|private)$"]["vehicle"!~"^(no|private)$"]["4wd_only"!="yes"](${bbox});`,
+    `way["highway"="track"]["tracktype"~"^(grade1|grade2|grade3)$"]["smoothness"!~"${undrivableSmoothness}"]["motor_vehicle"!~"^(no|private)$"]["motorcar"!~"^(no|private)$"]["vehicle"!~"^(no|private)$"]["4wd_only"!="yes"](${bbox});`,
   ];
 }
 
