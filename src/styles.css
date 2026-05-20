@@ -333,9 +333,18 @@ p {
   border-radius: 12px;
   box-shadow: var(--shadow-2);
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   max-height: calc(100vh - 88px);
   overflow: hidden;
+}
+
+.panel-footer {
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  display: grid;
+  gap: 8px;
+  box-shadow: 0 -6px 14px -10px rgba(15, 23, 42, 0.18);
 }
 
 .panel-header {
@@ -831,6 +840,112 @@ p {
   color: var(--ink);
 }
 
+/* ---- Search status banner ---- */
+
+.search-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  border: 1px solid transparent;
+}
+
+.search-status-text {
+  display: grid;
+  gap: 1px;
+  line-height: 1.25;
+}
+
+.search-status-text strong {
+  font-weight: 500;
+}
+
+.search-status-text small {
+  font-size: 0.72rem;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+.search-status-spinner,
+.search-status-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.search-status-spinner svg,
+.search-status-icon svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.search-status-running {
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  border-color: color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.search-status-running .search-status-spinner {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  color: var(--primary);
+  animation: spinner-spin 0.9s linear infinite;
+}
+
+.search-status-success {
+  background: var(--success-soft);
+  color: var(--success-ink);
+  border-color: color-mix(in srgb, var(--success-ink) 22%, transparent);
+  animation: status-pop 0.35s ease-out;
+}
+
+.search-status-success .search-status-icon {
+  background: var(--success-ink);
+  color: white;
+}
+
+.search-status-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+.search-status-error .search-status-icon {
+  background: var(--danger);
+  color: white;
+}
+
+.primary-button:disabled svg {
+  animation: spinner-spin 0.9s linear infinite;
+  transform-origin: 50% 50%;
+}
+
+@keyframes spinner-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes status-pop {
+  from {
+    transform: scale(0.96);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 /* ---- Layers panel (right) ---- */
 
 .layers-panel {
@@ -1296,7 +1411,8 @@ p {
   max-height: 56px;
 }
 
-.panel.collapsed .panel-body {
+.panel.collapsed .panel-body,
+.panel.collapsed .panel-footer {
   display: none;
 }
 

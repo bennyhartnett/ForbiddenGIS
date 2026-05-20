@@ -211,6 +211,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [resultCount, setResultCount] = useState(0);
   const [rawFeatureCount, setRawFeatureCount] = useState<number | null>(null);
   const [renderedFeatureCount, setRenderedFeatureCount] = useState(0);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [lastSearchDurationMs, setLastSearchDurationMs] = useState<number | null>(null);
+  const [searchOutcome, setSearchOutcome] = useState<"idle" | "success" | "error">("idle");
+  const searchStartedAtRef = useRef<number | null>(null);
   const [selectedFeature, setSelectedFeature] = useState<SelectedFeature | null>(null);
   const [streetViewState, setStreetViewState] = useState<StreetViewState>({ status: "idle" });
 
@@ -247,6 +251,24 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       ),
     [mode, rawQuery, selectedPreset, tagFilter, visibleDiagonalKm, zoom],
   );
+
+  // Swap favicon between idle globe and spinning globe while searching
+  useEffect(() => {
+    const link = document.getElementById("favicon") as HTMLLinkElement | null;
+    if (!link) return;
+    link.href = loading ? "/favicon-loading.svg" : "/favicon.svg";
+  }, [loading]);
+
+  // Tick the elapsed-time counter while a search is running
+  useEffect(() => {
+    if (!loading) return;
+    const start = searchStartedAtRef.current ?? Date.now();
+    setElapsedMs(Date.now() - start);
+    const id = window.setInterval(() => {
+      setElapsedMs(Date.now() - start);
+    }, 100);
+    return () => window.clearInterval(id);
+  }, [loading]);
 
   useEffect(() => {
     searchGateRef.current = {
@@ -448,6 +470,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     setSearchWarning(null);
     setShowSearchHereChip(false);
     setLoading(false);
+    setElapsedMs(0);
+    setLastSearchDurationMs(null);
+    setSearchOutcome("idle");
+    searchStartedAtRef.current = null;
   }, [clearDataLayer, closeStreetView]);
 
   const handleSearch = useCallback(async () => {
@@ -522,6 +548,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     setError(null);
     setSelectedFeature(null);
     setShowSearchHereChip(false);
+    setSearchOutcome("idle");
+    setLastSearchDurationMs(null);
+    setElapsedMs(0);
+    searchStartedAtRef.current = Date.now();
     closeStreetView();
 
     const center = map.getCenter();
@@ -572,6 +602,11 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       setResultCount(result.resultCount);
       setRenderedFeatureCount(result.features.length);
       setSearchWarning(result.warnings[0] ?? null);
+      const startedAt = searchStartedAtRef.current;
+      if (startedAt !== null) {
+        setLastSearchDurationMs(Date.now() - startedAt);
+      }
+      setSearchOutcome("success");
     } catch (searchError) {
       if ((searchError as Error).name === "AbortError") return;
       setError(
@@ -579,10 +614,16 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           ? searchError.message
           : "Search failed. Try a smaller area or a simpler filter.",
       );
+      const startedAt = searchStartedAtRef.current;
+      if (startedAt !== null) {
+        setLastSearchDurationMs(Date.now() - startedAt);
+      }
+      setSearchOutcome("error");
     } finally {
       if (abortRef.current === abortController) {
         abortRef.current = null;
         setLoading(false);
+        searchStartedAtRef.current = null;
       }
     }
   }, [
@@ -879,6 +920,9 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           resultCount={resultCount}
           renderedFeatureCount={renderedFeatureCount}
           rawFeatureCount={rawFeatureCount}
+          elapsedMs={elapsedMs}
+          lastSearchDurationMs={lastSearchDurationMs}
+          searchOutcome={searchOutcome}
         />
 
         <LayersPanel
@@ -1083,6 +1127,9 @@ function PresetPanel(props: {
   resultCount: number;
   renderedFeatureCount: number;
   rawFeatureCount: number | null;
+  elapsedMs: number;
+  lastSearchDurationMs: number | null;
+  searchOutcome: "idle" | "success" | "error";
 }) {
   return (
     <aside className={`panel preset-panel ${props.open ? "" : "collapsed"}`} aria-label="Scout queries">
@@ -1212,45 +1259,6 @@ function PresetPanel(props: {
           </div>
         ) : null}
 
-        <div className="panel-section">
-          <div className="difficulty-line">
-            <span>{props.difficulty.scope}</span>
-            <span className={`difficulty-badge difficulty-${props.difficulty.level}`}>
-              {props.difficulty.label}
-            </span>
-          </div>
-          <div className="action-row">
-            <button
-              type="button"
-              className="primary-button"
-              onClick={props.onSearch}
-              disabled={props.loading}
-            >
-              <SearchIcon />
-              {props.loading ? "Searching..." : "Search this area"}
-            </button>
-            <button type="button" className="ghost-button" onClick={props.onClear}>
-              Clear
-            </button>
-          </div>
-          <dl className="stats-strip">
-            <div>
-              <dt>Results</dt>
-              <dd>{props.resultCount.toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt>Rendered</dt>
-              <dd>{props.renderedFeatureCount.toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt>Raw OSM</dt>
-              <dd>
-                {props.rawFeatureCount === null ? "—" : props.rawFeatureCount.toLocaleString()}
-              </dd>
-            </div>
-          </dl>
-        </div>
-
         <details className="advanced-disclosure" open={props.mode !== "preset"}>
           <summary>
             <ChevronRightIcon />
@@ -1333,8 +1341,115 @@ function PresetPanel(props: {
           </div>
         </details>
       </div>
+
+      <div className="panel-footer">
+        <SearchStatusBanner
+          loading={props.loading}
+          elapsedMs={props.elapsedMs}
+          lastSearchDurationMs={props.lastSearchDurationMs}
+          searchOutcome={props.searchOutcome}
+          resultCount={props.resultCount}
+        />
+        <div className="difficulty-line">
+          <span>{props.difficulty.scope}</span>
+          <span className={`difficulty-badge difficulty-${props.difficulty.level}`}>
+            {props.difficulty.label}
+          </span>
+        </div>
+        <div className="action-row">
+          <button
+            type="button"
+            className="primary-button"
+            onClick={props.onSearch}
+            disabled={props.loading}
+          >
+            {props.loading ? <SpinnerIcon /> : <SearchIcon />}
+            {props.loading
+              ? `Searching... ${formatSeconds(props.elapsedMs)}`
+              : "Search this area"}
+          </button>
+          <button type="button" className="ghost-button" onClick={props.onClear}>
+            Clear
+          </button>
+        </div>
+        <dl className="stats-strip">
+          <div>
+            <dt>Results</dt>
+            <dd>{props.resultCount.toLocaleString()}</dd>
+          </div>
+          <div>
+            <dt>Rendered</dt>
+            <dd>{props.renderedFeatureCount.toLocaleString()}</dd>
+          </div>
+          <div>
+            <dt>Raw OSM</dt>
+            <dd>
+              {props.rawFeatureCount === null ? "—" : props.rawFeatureCount.toLocaleString()}
+            </dd>
+          </div>
+        </dl>
+      </div>
     </aside>
   );
+}
+
+function formatSeconds(ms: number) {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function SearchStatusBanner(props: {
+  loading: boolean;
+  elapsedMs: number;
+  lastSearchDurationMs: number | null;
+  searchOutcome: "idle" | "success" | "error";
+  resultCount: number;
+}) {
+  if (props.loading) {
+    return (
+      <div className="search-status search-status-running" role="status" aria-live="polite">
+        <span className="search-status-spinner" aria-hidden="true">
+          <SpinnerIcon />
+        </span>
+        <span className="search-status-text">
+          <strong>Searching the Overpass API…</strong>
+          <small>Elapsed {formatSeconds(props.elapsedMs)}</small>
+        </span>
+      </div>
+    );
+  }
+
+  if (props.searchOutcome === "success" && props.lastSearchDurationMs !== null) {
+    return (
+      <div className="search-status search-status-success" role="status" aria-live="polite">
+        <span className="search-status-icon" aria-hidden="true">
+          <CheckIcon />
+        </span>
+        <span className="search-status-text">
+          <strong>Done in {formatSeconds(props.lastSearchDurationMs)}</strong>
+          <small>
+            {props.resultCount.toLocaleString()}{" "}
+            {props.resultCount === 1 ? "result" : "results"}
+          </small>
+        </span>
+      </div>
+    );
+  }
+
+  if (props.searchOutcome === "error" && props.lastSearchDurationMs !== null) {
+    return (
+      <div className="search-status search-status-error" role="status" aria-live="polite">
+        <span className="search-status-icon" aria-hidden="true">
+          <CloseIcon />
+        </span>
+        <span className="search-status-text">
+          <strong>Search failed</strong>
+          <small>Stopped after {formatSeconds(props.lastSearchDurationMs)}</small>
+        </span>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 /* ---------------- LayersPanel ---------------- */
@@ -1686,6 +1801,14 @@ function SpinnerIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 4a8 8 0 1 1-8 8" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m4 12 5 5L20 6" />
     </svg>
   );
 }
