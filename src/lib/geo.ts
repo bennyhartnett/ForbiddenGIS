@@ -36,7 +36,12 @@ export type ScoutRole =
   | "context-road"
   | "context-parking"
   | "context-water"
-  | "context-building";
+  | "context-building"
+  | "context-woods"
+  | "context-park"
+  | "context-pull-off"
+  | "context-trail"
+  | "context-industrial";
 
 export type ScoutCategory =
   | "simple"
@@ -46,7 +51,13 @@ export type ScoutCategory =
   | "bridge"
   | "water"
   | "building"
-  | "water-crossing";
+  | "water-crossing"
+  | "woods"
+  | "park"
+  | "pull-off"
+  | "barrier"
+  | "industrial"
+  | "off-road";
 
 export interface ScoutFeatureProperties {
   [key: string]: unknown;
@@ -57,6 +68,7 @@ export interface ScoutFeatureProperties {
   scoutRole?: ScoutRole;
   scoutCategory?: ScoutCategory;
   scoutMatchReason?: string;
+  scoutMatchDetail?: string;
   scoutMatchDistanceMeters?: number;
   scoutLat?: number;
   scoutLng?: number;
@@ -82,11 +94,40 @@ export interface SelectedFeature {
 }
 
 export type PresetId =
-  | "road-adjacent-parking"
-  | "trail-path-access"
-  | "road-to-road-walking-trail"
-  | "bridges-overpasses"
-  | "water-crossing-context";
+  | "preset-01"
+  | "preset-02"
+  | "preset-03"
+  | "preset-04"
+  | "preset-05"
+  | "preset-06"
+  | "preset-07"
+  | "preset-08"
+  | "preset-09"
+  | "preset-10"
+  | "preset-11"
+  | "preset-12"
+  | "preset-13"
+  | "preset-14"
+  | "preset-15"
+  | "preset-16"
+  | "preset-17"
+  | "preset-18"
+  | "preset-19"
+  | "preset-20"
+  | "preset-21"
+  | "preset-22"
+  | "preset-23"
+  | "preset-24"
+  | "preset-25"
+  | "preset-26"
+  | "preset-27"
+  | "preset-28"
+  | "preset-29"
+  | "preset-30"
+  | "preset-31"
+  | "preset-32"
+  | "preset-33"
+  | "preset-34";
 
 export interface PresetDefinition {
   id: PresetId;
@@ -105,6 +146,13 @@ export interface SpatialContext {
   bridges: GeoJSONFeature[];
   water: GeoJSONFeature[];
   buildings: GeoJSONFeature[];
+  woods: GeoJSONFeature[];
+  parks: GeoJSONFeature[];
+  pullOffs: GeoJSONFeature[];
+  barriers: GeoJSONFeature[];
+  trailheads: GeoJSONFeature[];
+  industrial: GeoJSONFeature[];
+  trees: GeoJSONFeature[];
 }
 
 export interface PresetResult {
@@ -206,6 +254,7 @@ export function attachScoutMetadata(
     scoutRole: role,
     scoutCategory: category,
     scoutMatchReason: reason.label,
+    scoutMatchDetail: reason.detail,
     scoutMatchDistanceMeters: reason.distanceMeters,
     scoutLat: coordinate.lat,
     scoutLng: coordinate.lng,
@@ -235,6 +284,7 @@ export function getFeatureTags(feature: GeoJSONFeature): Record<string, string> 
     "scoutRole",
     "scoutCategory",
     "scoutMatchReason",
+    "scoutMatchDetail",
     "scoutMatchDistanceMeters",
     "scoutLat",
     "scoutLng",
@@ -333,6 +383,10 @@ export function selectedFeatureFromProperties(
         typeof properties.scoutMatchReason === "string"
           ? properties.scoutMatchReason
           : "Matched query",
+      detail:
+        typeof properties.scoutMatchDetail === "string"
+          ? properties.scoutMatchDetail
+          : undefined,
       distanceMeters:
         typeof properties.scoutMatchDistanceMeters === "number"
           ? properties.scoutMatchDistanceMeters

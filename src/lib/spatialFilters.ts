@@ -2,9 +2,16 @@ import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import centroid from "@turf/centroid";
 import distance from "@turf/distance";
 import { lineString, point } from "@turf/helpers";
-import nearestPointOnLine from "@turf/nearest-point-on-line";
 import pointToLineDistance from "@turf/point-to-line-distance";
-import type { Feature, LineString, Point, Polygon } from "geojson";
+import type {
+  Feature,
+  Geometry,
+  LineString,
+  MultiPolygon,
+  Point,
+  Polygon,
+  Position,
+} from "geojson";
 import type {
   GeoJSONFeature,
   LatLng,
@@ -30,7 +37,21 @@ export interface SpatialFilterOptions {
   simpleMatchLabel?: string;
 }
 
+export const NO_BUILDINGS_DISTANCE_METERS = 30.48;
+export const NEAR_WATER_DISTANCE_METERS = 30;
+export const WATER_ADJACENT_DISTANCE_METERS = 50;
+export const NEAR_WOODS_DISTANCE_METERS = 50;
+export const NEAR_PARK_DISTANCE_METERS = 75;
+export const NEAR_PULL_OFF_DISTANCE_METERS = 100;
+export const TRAIL_TO_PARKING_DISTANCE_METERS = 100;
+export const TRAIL_TO_WATER_DISTANCE_METERS = 30;
+export const DEAD_END_TO_TRAIL_DISTANCE_METERS = 25;
+export const LOW_SPEED_MPH_VALUES = [25, 30] as const;
+export const TREE_LINED_REQUIRED_METERS = 30.48;
+export const TREE_CONTEXT_DISTANCE_METERS = 15;
+
 const PRIVATE_VALUES = new Set(["private", "no", "customers", "permit"]);
+const RESTRICTED_VALUES = new Set(["private", "no", "customers", "permit", "destination"]);
 const ROAD_TYPES = new Set([
   "motorway",
   "trunk",
@@ -43,6 +64,13 @@ const ROAD_TYPES = new Set([
   "living_street",
   "track",
 ]);
+const QUIET_ROAD_TYPES = new Set([
+  "residential",
+  "living_street",
+  "unclassified",
+  "service",
+  "track",
+]);
 const TRAIL_TYPES = new Set([
   "path",
   "footway",
@@ -52,6 +80,46 @@ const TRAIL_TYPES = new Set([
   "steps",
   "pedestrian",
 ]);
+const WALKING_PATH_TYPES = new Set(["path", "footway", "pedestrian", "steps", "bridleway"]);
+const UNPAVED_SURFACES = new Set([
+  "unpaved",
+  "gravel",
+  "fine_gravel",
+  "dirt",
+  "earth",
+  "ground",
+  "sand",
+  "compacted",
+  "grass",
+  "mud",
+]);
+const ROUGH_SURFACES = new Set(["dirt", "earth", "ground", "mud", "sand", "rock", "grass"]);
+const ROUGH_TRACKTYPES = new Set(["grade3", "grade4", "grade5"]);
+const ROUGH_SMOOTHNESS = new Set([
+  "bad",
+  "very_bad",
+  "horrible",
+  "very_horrible",
+  "impassable",
+]);
+const BARRIER_VALUES = new Set([
+  "gate",
+  "chain",
+  "bollard",
+  "block",
+  "lift_gate",
+  "swing_gate",
+  "cattle_grid",
+]);
+const STREET_PARKING_KEYS = [
+  "parking:left",
+  "parking:right",
+  "parking:both",
+  "parking:lane:left",
+  "parking:lane:right",
+  "parking:lane:both",
+];
+const PARKING_FORBIDDEN_PATTERN = /^(no|none|no_parking|no_stopping|fire_lane)$/i;
 
 export function prepareSimpleResult(
   features: GeoJSONFeature[],
@@ -76,129 +144,609 @@ export function applyPresetSpatialFilters(
   const resultFeatures: GeoJSONFeature[] = [];
   const contextFeatures: GeoJSONFeature[] = [];
 
+  const addResult = (
+    feature: GeoJSONFeature,
+    category: ScoutCategory,
+    label: string,
+    distanceMeters?: number,
+    detail?: string,
+  ) => {
+    resultFeatures.push(
+      attachScoutMetadata(feature, resultFeatures.length, "result", category, {
+        label,
+        distanceMeters,
+        detail,
+        category,
+      }),
+    );
+  };
+
   switch (preset.id) {
-    case "road-adjacent-parking":
-      contextFeatures.push(
-        ...context.roads.map((feature, index) =>
-          tagContext(feature, index, "context-road", "road", "Road context"),
-        ),
-      );
-      for (const [index, parking] of context.parking.entries()) {
-        const nearest = nearestDistanceToFeatures(
-          representativeCoordinate(parking),
+    case "preset-01":
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (!isClearlyPrivate(road) && (isUnpavedRoad(tags) || isRoughOrHighClearanceRoad(tags))) {
+          addResult(
+            road,
+            "off-road",
+            "Public-ish off-roading / rough road",
+            undefined,
+            tagDetail(tags, ["highway", "surface", "tracktype", "smoothness", "access"]),
+          );
+        }
+      }
+      break;
+
+    case "preset-02":
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (isClearlyRestricted(road) && (isUnpavedRoad(tags) || isRoughOrHighClearanceRoad(tags))) {
+          addResult(
+            road,
+            "off-road",
+            "Restricted/private off-roading or rough road",
+            undefined,
+            tagDetail(tags, ["highway", "surface", "tracktype", "smoothness", "access", "motor_vehicle"]),
+          );
+        }
+      }
+      break;
+
+    case "preset-03":
+      for (const feature of features) {
+        const tags = getFeatureTags(feature);
+        if (hasGolfCartTag(tags)) {
+          addResult(
+            feature,
+            categoryForFeature(feature),
+            "Golf cart or low-speed vehicle tag",
+            undefined,
+            tagDetail(tags, ["golf_cart", "vehicle:golf_cart", "low_speed_vehicle", "access"]),
+          );
+        }
+      }
+      break;
+
+    case "preset-04":
+      addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      for (const parking of context.parking) {
+        if (isClearlyPrivate(parking)) continue;
+        const building = nearestFeatureDistance(parking, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
+        if (building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+          addResult(
+            parking,
+            "parking",
+            "Secluded public-ish parking with no mapped buildings nearby",
+            finiteDistance(building.distanceMeters),
+            `Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(getFeatureTags(parking), ["amenity", "parking", "access"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-05":
+      addContexts(contextFeatures, context.water, "context-water", "water", "Water context");
+      for (const road of context.roads) {
+        if (isClearlyPrivate(road)) continue;
+        const water = nearestFeatureDistance(road, context.water, WATER_ADJACENT_DISTANCE_METERS);
+        if (water.distanceMeters <= WATER_ADJACENT_DISTANCE_METERS) {
+          addResult(
+            road,
+            "road",
+            "Water-adjacent road",
+            water.distanceMeters,
+            `Nearest mapped water: ${formatMeters(water.distanceMeters)}. ${tagDetail(getFeatureTags(road), ["highway", "name", "access"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-06":
+      for (const bridge of context.bridges) {
+        addResult(
+          bridge,
+          "bridge",
+          "Bridge or overpass tag",
+          undefined,
+          tagDetail(getFeatureTags(bridge), ["bridge", "man_made", "highway", "waterway"]),
+        );
+      }
+      break;
+
+    case "preset-07":
+      addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      for (const deadEnd of deadEndCandidates(context)) {
+        if (isClearlyPrivate(deadEnd)) continue;
+        const building = nearestFeatureDistance(deadEnd, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
+        if (building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+          addResult(
+            deadEnd,
+            "road",
+            "Cul-de-sac/dead end with no mapped buildings nearby",
+            finiteDistance(building.distanceMeters),
+            `Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(getFeatureTags(deadEnd), ["highway", "junction", "noexit", "access"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-08":
+      addContexts(contextFeatures, context.water, "context-water", "water", "Water context");
+      for (const road of context.roads) {
+        if (isClearlyPrivate(road)) continue;
+        const water = roadEndsNearFeatureDistance(road, context.water, NEAR_WATER_DISTANCE_METERS);
+        if (water.distanceMeters <= NEAR_WATER_DISTANCE_METERS) {
+          addResult(
+            road,
+            "road",
+            "Road access point near water",
+            water.distanceMeters,
+            `Road endpoint to water: ${formatMeters(water.distanceMeters)}. ${tagDetail(getFeatureTags(road), ["highway", "name", "access"])}`,
+          );
+        }
+      }
+      for (const parking of context.parking) {
+        if (isClearlyPrivate(parking)) continue;
+        const water = nearestFeatureDistance(parking, context.water, NEAR_WATER_DISTANCE_METERS);
+        if (water.distanceMeters <= NEAR_WATER_DISTANCE_METERS) {
+          addResult(
+            parking,
+            "parking",
+            "Parking access point near water",
+            water.distanceMeters,
+            `Parking to water: ${formatMeters(water.distanceMeters)}. ${tagDetail(getFeatureTags(parking), ["amenity", "parking", "access"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-09":
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (isStreetParkingLegalish(tags)) {
+          addResult(
+            road,
+            "road",
+            "Road with explicit legal-ish street parking tags",
+            undefined,
+            parkingDetail(tags),
+          );
+        }
+      }
+      break;
+
+    case "preset-10":
+      addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (!isStreetParkingLegalish(tags)) continue;
+        const building = nearestFeatureDistance(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
+        if (building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+          addResult(
+            road,
+            "road",
+            "Street-parking road with no mapped buildings nearby",
+            finiteDistance(building.distanceMeters),
+            `${parkingDetail(tags)} Nearest mapped building: ${formatMeters(building.distanceMeters)}.`,
+          );
+        }
+      }
+      break;
+
+    case "preset-11":
+      addContexts(contextFeatures, context.roads, "context-road", "road", "Road context");
+      addContexts(contextFeatures, context.trails, "context-trail", "trail", "Trail context");
+      for (const trail of context.trails.filter((feature) => isWalkingPathFeature(feature))) {
+        if (isClearlyPrivate(trail) || allowsMotorVehicles(getFeatureTags(trail))) continue;
+        const metrics = pathConnectionMetrics(
+          trail,
+          deadEndCandidates(context),
           context.roads,
-          80,
+          DEAD_END_TO_TRAIL_DISTANCE_METERS,
+          55,
         );
-        if (nearest.distanceMeters <= 80) {
-          resultFeatures.push(
-            attachScoutMetadata(parking, index, "result", "parking", {
-              label: "Parking within 80 m of a drivable road",
-              distanceMeters: nearest.distanceMeters,
-              category: "parking",
-            }),
+        if (metrics.connected) {
+          addResult(
+            trail,
+            "trail",
+            "Road-to-road dead ends connected by walking trail",
+            metrics.distanceMeters,
+            `Dead-end/road endpoint proximity: ${formatMeters(metrics.distanceMeters)}. ${tagDetail(getFeatureTags(trail), ["highway", "foot", "access", "name"])}`,
           );
         }
       }
       break;
-    case "trail-path-access":
-      contextFeatures.push(
-        ...context.roads.map((feature, index) =>
-          tagContext(feature, index, "context-road", "road", "Road context"),
-        ),
-        ...context.parking.map((feature, index) =>
-          tagContext(feature, index, "context-parking", "parking", "Parking context"),
-        ),
-      );
-      for (const [index, trail] of context.trails.entries()) {
-        if (isClearlyPrivate(trail)) {
-          continue;
-        }
-        const coordinate = representativeCoordinate(trail);
-        const roadDistance = nearestDistanceToFeatures(coordinate, context.roads, 75);
-        const parkingDistance = nearestDistanceToFeatures(coordinate, context.parking, 75);
-        const bestDistance = Math.min(
-          roadDistance.distanceMeters,
-          parkingDistance.distanceMeters,
-        );
-        if (bestDistance <= 75) {
-          resultFeatures.push(
-            attachScoutMetadata(trail, index, "result", "trail", {
-              label: "Trail/path within 75 m of a road or parking feature",
-              distanceMeters: bestDistance,
-              category: "trail",
-            }),
+
+    case "preset-12":
+      addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (!isSpecificMph(tags, 25) || isClearlyPrivate(road)) continue;
+        const building = nearestFeatureDistance(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
+        if (building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+          addResult(
+            road,
+            "road",
+            "25 mph road with no mapped buildings nearby",
+            finiteDistance(building.distanceMeters),
+            `Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(tags, ["highway", "maxspeed", "access"])}`,
           );
         }
       }
       break;
-    case "road-to-road-walking-trail":
-      contextFeatures.push(
-        ...context.roads.map((feature, index) =>
-          tagContext(feature, index, "context-road", "road", "Road context"),
-        ),
-      );
-      for (const [index, trail] of context.trails.entries()) {
-        if (isClearlyPrivate(trail)) {
-          continue;
-        }
 
-        const endpoints = firstLineEndpoints(trail);
-        if (!endpoints) {
-          continue;
-        }
-
-        const firstRoad = nearestRoadForPoint(endpoints[0], context.roads, 55);
-        const secondRoad = nearestRoadForPoint(endpoints[1], context.roads, 55);
-
-        if (
-          firstRoad.distanceMeters <= 55 &&
-          secondRoad.distanceMeters <= 55 &&
-          firstRoad.osmId !== secondRoad.osmId
-        ) {
-          resultFeatures.push(
-            attachScoutMetadata(trail, index, "result", "trail", {
-              label: "Walking route endpoints approach two different roads",
-              distanceMeters: Math.max(firstRoad.distanceMeters, secondRoad.distanceMeters),
-              category: "trail",
-            }),
+    case "preset-13":
+      addContexts(contextFeatures, context.trees, "context-woods", "woods", "Tree context");
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (!isSpecificMph(tags, 25) || isClearlyPrivate(road)) continue;
+        const evidence = treeEvidence(road, context);
+        if (evidence.matched) {
+          addResult(
+            road,
+            "road",
+            "25 mph tree-lined road",
+            finiteDistance(evidence.distanceMeters),
+            `${evidence.detail} ${tagDetail(tags, ["highway", "maxspeed", "tree_lined", "access"])}`,
           );
         }
       }
       break;
-    case "bridges-overpasses":
-      for (const [index, bridge] of context.bridges.entries()) {
-        resultFeatures.push(
-          attachScoutMetadata(bridge, index, "result", "bridge", {
-            label: "Bridge or overpass tag",
-            category: "bridge",
-          }),
+
+    case "preset-14":
+      addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (!isLowSpeedRoad(tags) || !isShoulderedRoad(tags) || isClearlyPrivate(road)) continue;
+        const building = nearestFeatureDistance(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
+        if (building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+          addResult(
+            road,
+            "road",
+            "Low-speed shouldered road with no mapped buildings nearby",
+            finiteDistance(building.distanceMeters),
+            `Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(tags, ["maxspeed", "shoulder", "shoulder:left", "shoulder:right", "shoulder:both", "access"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-15":
+      addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (!isUnpavedRoad(tags) || isClearlyPrivate(road)) continue;
+        const building = nearestFeatureDistance(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
+        if (building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+          addResult(
+            road,
+            "off-road",
+            "Unpaved public-ish road with no mapped buildings nearby",
+            finiteDistance(building.distanceMeters),
+            `Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(tags, ["surface", "tracktype", "access", "highway"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-16":
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (!isRoughOrHighClearanceRoad(tags)) continue;
+        addResult(
+          road,
+          "off-road",
+          isClearlyPrivate(road) ? "Rough or high-clearance road, restricted/private tag" : "Rough or high-clearance road",
+          undefined,
+          tagDetail(tags, ["tracktype", "smoothness", "surface", "access", "motor_vehicle", "highway"]),
         );
       }
       break;
-    case "water-crossing-context":
-      contextFeatures.push(
-        ...context.water.map((feature, index) =>
-          tagContext(feature, index, "context-water", "water", "Water context"),
-        ),
-      );
-      for (const [index, crossing] of context.bridges.entries()) {
-        const nearest = nearestDistanceToFeatures(
-          representativeCoordinate(crossing),
-          context.water,
-          90,
+
+    case "preset-17":
+      addContexts(contextFeatures, context.water, "context-water", "water", "Water context");
+      for (const road of context.roads) {
+        if (isClearlyPrivate(road)) continue;
+        const water = roadEndsNearFeatureDistance(road, context.water, NEAR_WATER_DISTANCE_METERS);
+        if (water.distanceMeters <= NEAR_WATER_DISTANCE_METERS) {
+          addResult(
+            road,
+            "road",
+            "Public-ish road ending near water",
+            water.distanceMeters,
+            `Endpoint-to-water distance: ${formatMeters(water.distanceMeters)}. ${tagDetail(getFeatureTags(road), ["highway", "name", "access"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-18":
+      addContexts(contextFeatures, context.woods, "context-woods", "woods", "Woods/forest context");
+      addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      for (const deadEnd of deadEndCandidates(context)) {
+        if (isClearlyPrivate(deadEnd)) continue;
+        const woods = nearestFeatureDistance(deadEnd, context.woods, NEAR_WOODS_DISTANCE_METERS);
+        const building = nearestFeatureDistance(deadEnd, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
+        if (woods.distanceMeters <= NEAR_WOODS_DISTANCE_METERS && building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+          addResult(
+            deadEnd,
+            "road",
+            "Dead end near woods with no mapped buildings nearby",
+            woods.distanceMeters,
+            `Nearest woods/forest: ${formatMeters(woods.distanceMeters)}. Nearest mapped building: ${formatMeters(building.distanceMeters)}.`,
+          );
+        }
+      }
+      break;
+
+    case "preset-19":
+      addContexts(contextFeatures, [...context.trees, ...context.woods], "context-woods", "woods", "Tree/woods context");
+      for (const parking of [...context.parking, ...context.pullOffs]) {
+        if (isClearlyPrivate(parking)) continue;
+        const tree = nearestFeatureDistance(parking, context.trees, TREE_CONTEXT_DISTANCE_METERS);
+        const woods = nearestFeatureDistance(parking, context.woods, NEAR_WATER_DISTANCE_METERS);
+        const best = Math.min(tree.distanceMeters, woods.distanceMeters);
+        if (best <= (tree.distanceMeters <= TREE_CONTEXT_DISTANCE_METERS ? TREE_CONTEXT_DISTANCE_METERS : NEAR_WATER_DISTANCE_METERS)) {
+          addResult(
+            parking,
+            isPullOffFeature(parking) ? "pull-off" : "parking",
+            "Tree-covered parking or pull-off",
+            best,
+            `${tree.distanceMeters <= TREE_CONTEXT_DISTANCE_METERS ? "Tree/tree_row evidence" : "Woods/forest evidence"} within ${formatMeters(best)}. ${tagDetail(getFeatureTags(parking), ["amenity", "parking", "highway", "access"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-20":
+      for (const pullOff of [...context.pullOffs, ...context.roads.filter((feature) => isStreetParkingLegalish(getFeatureTags(feature)))]) {
+        const tags = getFeatureTags(pullOff);
+        if (isClearlyPrivate(pullOff) || hasNoParking(tags)) continue;
+        addResult(
+          pullOff,
+          "pull-off",
+          "Roadside pull-off or layby",
+          undefined,
+          tagDetail(tags, ["parking", "parking:left", "parking:right", "parking:both", "highway", "access"]),
         );
-        const hasWaterNearby = nearest.distanceMeters <= 90 || context.water.length === 0;
-        if (hasWaterNearby) {
-          resultFeatures.push(
-            attachScoutMetadata(crossing, index, "result", "water-crossing", {
-              label:
-                context.water.length > 0
-                  ? "Bridge/culvert candidate near mapped water"
-                  : "Bridge/culvert candidate",
-              distanceMeters:
-                Number.isFinite(nearest.distanceMeters) ? nearest.distanceMeters : undefined,
-              category: "water-crossing",
-            }),
+      }
+      break;
+
+    case "preset-21":
+      addContexts(contextFeatures, context.water, "context-water", "water", "Water context");
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (!isStreetParkingLegalish(tags)) continue;
+        const water = nearestFeatureDistance(road, context.water, WATER_ADJACENT_DISTANCE_METERS);
+        if (water.distanceMeters <= WATER_ADJACENT_DISTANCE_METERS) {
+          addResult(
+            road,
+            "road",
+            "Street-parking road near water",
+            water.distanceMeters,
+            `${parkingDetail(tags)} Nearest mapped water: ${formatMeters(water.distanceMeters)}.`,
+          );
+        }
+      }
+      break;
+
+    case "preset-22":
+      addContexts(contextFeatures, [...context.parks, ...context.woods], "context-park", "park", "Park/woods context");
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (!isStreetParkingLegalish(tags)) continue;
+        const park = nearestFeatureDistance(road, [...context.parks, ...context.woods], NEAR_PARK_DISTANCE_METERS);
+        if (park.distanceMeters <= NEAR_PARK_DISTANCE_METERS) {
+          addResult(
+            road,
+            "road",
+            "Street-parking road near park or woods",
+            park.distanceMeters,
+            `${parkingDetail(tags)} Nearest park/woods: ${formatMeters(park.distanceMeters)}.`,
+          );
+        }
+      }
+      break;
+
+    case "preset-23":
+      addContexts(contextFeatures, [...context.parking, ...context.pullOffs], "context-pull-off", "pull-off", "Pull-off/parking context");
+      for (const bridge of context.bridges) {
+        const pullOff = nearestFeatureDistance(bridge, [...context.parking, ...context.pullOffs], NEAR_PULL_OFF_DISTANCE_METERS);
+        if (pullOff.distanceMeters <= NEAR_PULL_OFF_DISTANCE_METERS) {
+          addResult(
+            bridge,
+            "bridge",
+            "Bridge with nearby pull-off or parking",
+            pullOff.distanceMeters,
+            `Nearest pull-off/parking: ${formatMeters(pullOff.distanceMeters)}. ${tagDetail(getFeatureTags(bridge), ["bridge", "man_made", "highway", "name"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-24":
+      for (const ford of features.filter(isFordFeature)) {
+        const tags = getFeatureTags(ford);
+        addResult(
+          ford,
+          "water-crossing",
+          isClearlyPrivate(ford) ? "Ford or water crossing, restricted/private tag" : "Ford or water crossing",
+          undefined,
+          tagDetail(tags, ["highway", "ford", "surface", "access", "waterway"]),
+        );
+      }
+      break;
+
+    case "preset-25":
+      for (const barrier of features.filter(isBarrierOrGateFeature)) {
+        const tags = getFeatureTags(barrier);
+        addResult(
+          barrier,
+          "barrier",
+          isRoadFeature(barrier) ? "Gated road or access barrier, restricted road tag" : "Gated road or access barrier",
+          undefined,
+          tagDetail(tags, ["barrier", "access", "motor_vehicle", "operator", "ownership", "highway"]),
+        );
+      }
+      break;
+
+    case "preset-26":
+      addContexts(contextFeatures, context.parking, "context-parking", "parking", "Parking context");
+      for (const trailish of [...context.trailheads, ...context.trails]) {
+        if (isClearlyPrivate(trailish)) continue;
+        const parking = nearestFeatureDistance(trailish, context.parking, TRAIL_TO_PARKING_DISTANCE_METERS);
+        if (parking.distanceMeters <= TRAIL_TO_PARKING_DISTANCE_METERS) {
+          addResult(
+            trailish,
+            isTrailheadFeature(trailish) ? "trail" : "trail",
+            "Public trailhead or trail near parking",
+            parking.distanceMeters,
+            `Parking distance: ${formatMeters(parking.distanceMeters)}. ${tagDetail(getFeatureTags(trailish), ["tourism", "highway", "name", "access"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-27":
+      addContexts(contextFeatures, context.parking, "context-parking", "parking", "Parking context");
+      addContexts(contextFeatures, context.water, "context-water", "water", "Water context");
+      for (const path of context.trails.filter(isWalkingPathFeature)) {
+        if (isClearlyPrivate(path)) continue;
+        const parking = nearestFeatureDistance(path, context.parking, TRAIL_TO_PARKING_DISTANCE_METERS);
+        const water = nearestFeatureDistance(path, context.water, TRAIL_TO_WATER_DISTANCE_METERS);
+        if (parking.distanceMeters <= TRAIL_TO_PARKING_DISTANCE_METERS && water.distanceMeters <= TRAIL_TO_WATER_DISTANCE_METERS) {
+          addResult(
+            path,
+            "trail",
+            "Walking path from parking toward water",
+            Math.max(parking.distanceMeters, water.distanceMeters),
+            `Parking distance: ${formatMeters(parking.distanceMeters)}. Water distance: ${formatMeters(water.distanceMeters)}.`,
+          );
+        }
+      }
+      break;
+
+    case "preset-28":
+      addContexts(contextFeatures, deadEndCandidates(context), "context-road", "road", "Dead-end context");
+      addContexts(contextFeatures, context.water, "context-water", "water", "Water context");
+      for (const path of context.trails.filter(isWalkingPathFeature)) {
+        if (isClearlyPrivate(path)) continue;
+        const deadEnd = nearestFeatureDistance(path, deadEndCandidates(context), DEAD_END_TO_TRAIL_DISTANCE_METERS);
+        const water = nearestFeatureDistance(path, context.water, TRAIL_TO_WATER_DISTANCE_METERS);
+        if (deadEnd.distanceMeters <= DEAD_END_TO_TRAIL_DISTANCE_METERS && water.distanceMeters <= TRAIL_TO_WATER_DISTANCE_METERS) {
+          addResult(
+            path,
+            "trail",
+            "Walking path from dead end to water",
+            Math.max(deadEnd.distanceMeters, water.distanceMeters),
+            `Dead-end distance: ${formatMeters(deadEnd.distanceMeters)}. Water distance: ${formatMeters(water.distanceMeters)}.`,
+          );
+        }
+      }
+      break;
+
+    case "preset-29":
+      addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (!isUnlitRoad(tags) || isClearlyPrivate(road)) continue;
+        const building = nearestFeatureDistance(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
+        if (building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+          addResult(
+            road,
+            "road",
+            "Unlit secluded road",
+            finiteDistance(building.distanceMeters),
+            `Lit tag: ${tags.lit ?? "n/a"}. Nearest mapped building: ${formatMeters(building.distanceMeters)}.`,
+          );
+        }
+      }
+      break;
+
+    case "preset-30":
+      addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (!isLikelyQuietRoad(tags) || (!isNoSidewalkRoad(tags) && !isLowSpeedRoad(tags)) || isClearlyPrivate(road)) continue;
+        const buildingCount = countFeaturesWithin(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
+        if (buildingCount <= 1) {
+          addResult(
+            road,
+            "road",
+            "No-sidewalk quiet road",
+            undefined,
+            `Mapped buildings within 100 feet: ${buildingCount}. ${tagDetail(tags, ["sidewalk", "sidewalk:left", "sidewalk:right", "maxspeed", "highway"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-31":
+      addContexts(contextFeatures, context.roads, "context-road", "road", "Road context");
+      for (const path of context.trails.filter(isWalkingPathFeature)) {
+        const tags = getFeatureTags(path);
+        if (isClearlyPrivate(path) || allowsMotorVehicles(tags)) continue;
+        const metrics = endpointsNearDifferentFeatures(path, context.roads, 45);
+        if (metrics.connected) {
+          addResult(
+            path,
+            "trail",
+            "Pedestrian cut-through between roads/neighborhoods",
+            metrics.distanceMeters,
+            `Connected road proximity: ${formatMeters(metrics.distanceMeters)}. ${tagDetail(tags, ["highway", "footway", "name", "access"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-32":
+      addContexts(contextFeatures, context.roads, "context-road", "road", "Road context");
+      for (const trail of context.trails.filter(isNamedTrailFeature)) {
+        if (isClearlyPrivate(trail)) continue;
+        const road = nearestFeatureDistance(trail, context.roads, 10);
+        if (road.distanceMeters <= 10) {
+          addResult(
+            trail,
+            "trail",
+            "Named trail crossing or meeting a road",
+            road.distanceMeters,
+            `Road crossing/meeting distance: ${formatMeters(road.distanceMeters)}. ${tagDetail(getFeatureTags(trail), ["name", "route", "highway", "access"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-33":
+      addContexts(contextFeatures, context.industrial, "context-industrial", "industrial", "Industrial context");
+      for (const deadEnd of deadEndCandidates(context)) {
+        const industrial = nearestFeatureDistance(deadEnd, context.industrial, NEAR_PULL_OFF_DISTANCE_METERS);
+        if (industrial.distanceMeters <= NEAR_PULL_OFF_DISTANCE_METERS) {
+          addResult(
+            deadEnd,
+            "industrial",
+            isClearlyPrivate(deadEnd) ? "Industrial-area dead end, restricted/private tag" : "Industrial-area dead end",
+            industrial.distanceMeters,
+            `Industrial area distance: ${formatMeters(industrial.distanceMeters)}. ${tagDetail(getFeatureTags(deadEnd), ["highway", "junction", "noexit", "access"])}`,
+          );
+        }
+      }
+      break;
+
+    case "preset-34":
+      addContexts(contextFeatures, context.trees, "context-woods", "woods", "Tree context");
+      addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (!isLowSpeedRoad(tags) || isClearlyPrivate(road)) continue;
+        const evidence = treeEvidence(road, context);
+        const building = nearestFeatureDistance(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
+        if (evidence.matched && building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+          addResult(
+            road,
+            "road",
+            "Low-speed tree-lined road with no mapped buildings nearby",
+            finiteDistance(building.distanceMeters),
+            `${evidence.detail} Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(tags, ["maxspeed", "tree_lined", "highway", "access"])}`,
           );
         }
       }
@@ -206,19 +754,11 @@ export function applyPresetSpatialFilters(
   }
 
   if (options.includeWater) {
-    contextFeatures.push(
-      ...context.water.map((feature, index) =>
-        tagContext(feature, index, "context-water", "water", "Water context"),
-      ),
-    );
+    addContexts(contextFeatures, context.water, "context-water", "water", "Water context");
   }
 
   if (options.includeBuildings) {
-    contextFeatures.push(
-      ...context.buildings.map((feature, index) =>
-        tagContext(feature, index, "context-building", "building", "Building context"),
-      ),
-    );
+    addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
   }
 
   const deduped = dedupeFeatures([...resultFeatures, ...contextFeatures]);
@@ -227,13 +767,159 @@ export function applyPresetSpatialFilters(
 
 export function createSpatialContext(features: GeoJSONFeature[]): SpatialContext {
   return {
-    roads: features.filter(isDrivableRoad),
+    roads: features.filter(isRoadFeature),
     parking: features.filter(isParking),
     trails: features.filter(isTrailOrPath),
     bridges: features.filter(isBridgeOrCulvert),
     water: features.filter(isWater),
     buildings: features.filter(isBuilding),
+    woods: features.filter(isWoodsFeature),
+    parks: features.filter((feature) => isParkOrWoodsFeature(feature) && !isWoodsFeature(feature)),
+    pullOffs: features.filter(isPullOffFeature),
+    barriers: features.filter(isBarrierOrGateFeature),
+    trailheads: features.filter(isTrailheadFeature),
+    industrial: features.filter(isIndustrialFeature),
+    trees: features.filter(isTreeFeature),
   };
+}
+
+export function isLowSpeedRoad(tags: Record<string, string>): boolean {
+  const speed = normalizedMph(tags.maxspeed);
+  return speed !== null && LOW_SPEED_MPH_VALUES.includes(speed as 25 | 30);
+}
+
+export function isShoulderedRoad(tags: Record<string, string>): boolean {
+  return ["shoulder", "shoulder:left", "shoulder:right", "shoulder:both"].some((key) => {
+    const value = tags[key]?.toLowerCase();
+    return Boolean(value) && !["no", "none", "false", "0"].includes(value);
+  });
+}
+
+export function isUnpavedRoad(tags: Record<string, string>): boolean {
+  const surface = tags.surface?.toLowerCase();
+  return (
+    (surface !== undefined && UNPAVED_SURFACES.has(surface)) ||
+    tags.highway === "track" ||
+    Boolean(tags.tracktype)
+  );
+}
+
+export function isRoughOrHighClearanceRoad(tags: Record<string, string>): boolean {
+  return (
+    ROUGH_TRACKTYPES.has(tags.tracktype?.toLowerCase() ?? "") ||
+    ROUGH_SMOOTHNESS.has(tags.smoothness?.toLowerCase() ?? "") ||
+    ROUGH_SURFACES.has(tags.surface?.toLowerCase() ?? "")
+  );
+}
+
+export function isDeadEndFeature(feature: GeoJSONFeature): boolean {
+  const tags = getFeatureTags(feature);
+  return (
+    tags.noexit === "yes" ||
+    tags.junction === "cul_de_sac" ||
+    tags.highway === "turning_circle" ||
+    tags.highway === "turning_loop"
+  );
+}
+
+export function isWoodsFeature(feature: GeoJSONFeature): boolean {
+  const tags = getFeatureTags(feature);
+  return tags.natural === "wood" || tags.landuse === "forest";
+}
+
+export function isParkOrWoodsFeature(feature: GeoJSONFeature): boolean {
+  const tags = getFeatureTags(feature);
+  return (
+    isWoodsFeature(feature) ||
+    tags.leisure === "park" ||
+    tags.leisure === "nature_reserve" ||
+    tags.boundary === "protected_area"
+  );
+}
+
+export function isPullOffFeature(feature: GeoJSONFeature): boolean {
+  const tags = getFeatureTags(feature);
+  return (
+    tags.parking === "layby" ||
+    tags.parking === "street_side" ||
+    tags.highway === "rest_area" ||
+    tags.highway === "services" ||
+    isStreetParkingTagged(tags)
+  );
+}
+
+export function isParkingOrPullOffFeature(feature: GeoJSONFeature): boolean {
+  return isParking(feature) || isPullOffFeature(feature);
+}
+
+export function isFordFeature(feature: GeoJSONFeature): boolean {
+  const tags = getFeatureTags(feature);
+  return Boolean(tags.ford) || tags.highway === "ford";
+}
+
+export function isBarrierOrGateFeature(feature: GeoJSONFeature): boolean {
+  const tags = getFeatureTags(feature);
+  return BARRIER_VALUES.has(tags.barrier ?? "") || (isRoadFeature(feature) && hasAccessValue(tags, RESTRICTED_VALUES));
+}
+
+export function isTrailheadFeature(feature: GeoJSONFeature): boolean {
+  const tags = getFeatureTags(feature);
+  return tags.tourism === "trailhead";
+}
+
+export function isUnlitRoad(tags: Record<string, string>): boolean {
+  return (tags.lit === "no" || tags.lit === "limited") && isRoadTags(tags);
+}
+
+export function isNoSidewalkRoad(tags: Record<string, string>): boolean {
+  return (
+    ["no", "none", "separate"].includes(tags.sidewalk?.toLowerCase() ?? "") ||
+    (["no", "none"].includes(tags["sidewalk:left"]?.toLowerCase() ?? "") &&
+      ["no", "none"].includes(tags["sidewalk:right"]?.toLowerCase() ?? ""))
+  );
+}
+
+export function isIndustrialFeature(feature: GeoJSONFeature): boolean {
+  const tags = getFeatureTags(feature);
+  return tags.landuse === "industrial" || Boolean(tags.industrial);
+}
+
+export function isNamedTrailFeature(feature: GeoJSONFeature): boolean {
+  const tags = getFeatureTags(feature);
+  return Boolean(tags.name) && (isTrailOrPath(feature) || tags.route === "hiking" || tags.route === "foot");
+}
+
+export function isStreetParkingLegalish(tags: Record<string, string>): boolean {
+  return isRoadTags(tags) && isStreetParkingTagged(tags) && !hasNoParking(tags) && !hasAccessValue(tags, PRIVATE_VALUES);
+}
+
+export function isLikelyQuietRoad(tags: Record<string, string>): boolean {
+  return QUIET_ROAD_TYPES.has(tags.highway ?? "") && !hasAccessValue(tags, PRIVATE_VALUES);
+}
+
+export function roadEndsNearFeature(
+  roadFeature: GeoJSONFeature,
+  contextFeatures: GeoJSONFeature[],
+  maxMeters: number,
+): boolean {
+  return roadEndsNearFeatureDistance(roadFeature, contextFeatures, maxMeters).distanceMeters <= maxMeters;
+}
+
+export function featureNearAny(
+  feature: GeoJSONFeature,
+  contextFeatures: GeoJSONFeature[],
+  maxMeters: number,
+): boolean {
+  return nearestFeatureDistance(feature, contextFeatures, maxMeters).distanceMeters <= maxMeters;
+}
+
+export function pathConnectsFeatureGroups(
+  pathFeature: GeoJSONFeature,
+  groupA: GeoJSONFeature[],
+  groupB: GeoJSONFeature[],
+  maxMeters: number,
+): boolean {
+  return pathConnectionMetrics(pathFeature, groupA, groupB, maxMeters, maxMeters).connected;
 }
 
 function capFeatures(
@@ -258,6 +944,18 @@ function capFeatures(
   };
 }
 
+function addContexts(
+  target: GeoJSONFeature[],
+  features: GeoJSONFeature[],
+  role: ScoutRole,
+  category: ScoutCategory,
+  label: string,
+): void {
+  for (const [index, feature] of features.entries()) {
+    target.push(tagContext(feature, index, role, category, label));
+  }
+}
+
 function tagContext(
   feature: GeoJSONFeature,
   index: number,
@@ -275,7 +973,7 @@ function dedupeFeatures(features: GeoJSONFeature[]): GeoJSONFeature[] {
   for (const feature of features) {
     const key = `${feature.properties?.type ?? "feature"}-${feature.properties?.id ?? output.length}-${
       feature.properties?.scoutRole ?? "result"
-    }`;
+    }-${feature.properties?.scoutCategory ?? "simple"}`;
     if (seen.has(key)) {
       continue;
     }
@@ -287,28 +985,42 @@ function dedupeFeatures(features: GeoJSONFeature[]): GeoJSONFeature[] {
 }
 
 function categoryForFeature(feature: GeoJSONFeature): ScoutCategory {
+  if (isBarrierOrGateFeature(feature)) return "barrier";
+  if (isFordFeature(feature)) return "water-crossing";
   if (isBridgeOrCulvert(feature)) return "bridge";
   if (isWater(feature)) return "water";
   if (isBuilding(feature)) return "building";
+  if (isPullOffFeature(feature)) return "pull-off";
   if (isParking(feature)) return "parking";
+  if (isIndustrialFeature(feature)) return "industrial";
+  if (isWoodsFeature(feature)) return "woods";
+  if (isParkOrWoodsFeature(feature)) return "park";
   if (isTrailOrPath(feature)) return "trail";
-  if (isDrivableRoad(feature)) return "road";
+  if (isRoadFeature(feature)) return "road";
   return "simple";
 }
 
 function isParking(feature: GeoJSONFeature): boolean {
   const tags = getFeatureTags(feature);
-  return tags.amenity === "parking" || Boolean(tags.parking);
+  return tags.amenity === "parking" || tags.parking === "surface" || tags.parking === "street_side";
 }
 
-function isDrivableRoad(feature: GeoJSONFeature): boolean {
-  const tags = getFeatureTags(feature);
-  return ROAD_TYPES.has(tags.highway ?? "") && !isClearlyPrivate(feature);
+function isRoadFeature(feature: GeoJSONFeature): boolean {
+  return isRoadTags(getFeatureTags(feature));
+}
+
+function isRoadTags(tags: Record<string, string>): boolean {
+  return ROAD_TYPES.has(tags.highway ?? "");
 }
 
 function isTrailOrPath(feature: GeoJSONFeature): boolean {
   const tags = getFeatureTags(feature);
-  return TRAIL_TYPES.has(tags.highway ?? "") || tags.route === "hiking";
+  return TRAIL_TYPES.has(tags.highway ?? "") || tags.route === "hiking" || tags.route === "foot";
+}
+
+function isWalkingPathFeature(feature: GeoJSONFeature): boolean {
+  const tags = getFeatureTags(feature);
+  return WALKING_PATH_TYPES.has(tags.highway ?? "") || tags.route === "foot" || tags.route === "hiking";
 }
 
 function isBridgeOrCulvert(feature: GeoJSONFeature): boolean {
@@ -330,13 +1042,95 @@ function isBuilding(feature: GeoJSONFeature): boolean {
   return Boolean(tags.building) && tags.building !== "no";
 }
 
-function isClearlyPrivate(feature: GeoJSONFeature): boolean {
+function isTreeFeature(feature: GeoJSONFeature): boolean {
   const tags = getFeatureTags(feature);
-  return (
-    PRIVATE_VALUES.has(tags.access ?? "") ||
-    PRIVATE_VALUES.has(tags.foot ?? "") ||
-    PRIVATE_VALUES.has(tags.vehicle ?? "")
+  return tags.natural === "tree" || tags.natural === "tree_row";
+}
+
+function isClearlyPrivate(feature: GeoJSONFeature): boolean {
+  return hasAccessValue(getFeatureTags(feature), PRIVATE_VALUES);
+}
+
+function isClearlyRestricted(feature: GeoJSONFeature): boolean {
+  return hasAccessValue(getFeatureTags(feature), RESTRICTED_VALUES);
+}
+
+function hasAccessValue(tags: Record<string, string>, values: Set<string>): boolean {
+  return [
+    "access",
+    "foot",
+    "vehicle",
+    "motor_vehicle",
+    "motorcar",
+    "bicycle",
+    "private",
+  ].some((key) => values.has(tags[key]?.toLowerCase() ?? ""));
+}
+
+function hasGolfCartTag(tags: Record<string, string>): boolean {
+  return Boolean(tags.golf_cart || tags["vehicle:golf_cart"] || tags.low_speed_vehicle);
+}
+
+function allowsMotorVehicles(tags: Record<string, string>): boolean {
+  return ["yes", "designated", "permissive"].some(
+    (value) => tags.motor_vehicle === value || tags.vehicle === value || tags.motorcar === value,
   );
+}
+
+function hasNoParking(tags: Record<string, string>): boolean {
+  return STREET_PARKING_KEYS.some((key) => PARKING_FORBIDDEN_PATTERN.test(tags[key] ?? ""));
+}
+
+function isStreetParkingTagged(tags: Record<string, string>): boolean {
+  return STREET_PARKING_KEYS.some((key) => {
+    const value = tags[key];
+    return Boolean(value) && !PARKING_FORBIDDEN_PATTERN.test(value);
+  });
+}
+
+function normalizedMph(value: string | undefined): number | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  const match = normalized.match(/^(\d+)\s*(mph|mp\/h)?$/);
+  if (!match) return null;
+  return Number(match[1]);
+}
+
+function isSpecificMph(tags: Record<string, string>, mph: number): boolean {
+  return normalizedMph(tags.maxspeed) === mph;
+}
+
+function deadEndCandidates(context: SpatialContext): GeoJSONFeature[] {
+  return dedupeFeatures([
+    ...context.roads.filter(isDeadEndFeature),
+    ...context.roads.filter((feature) => getFeatureTags(feature).noexit === "yes"),
+    ...context.trails.filter(isDeadEndFeature),
+  ]);
+}
+
+function nearestFeatureDistance(
+  feature: GeoJSONFeature,
+  features: GeoJSONFeature[],
+  stopAtMeters: number,
+): { distanceMeters: number; feature?: GeoJSONFeature } {
+  let best = Number.POSITIVE_INFINITY;
+  let bestFeature: GeoJSONFeature | undefined;
+  const featureId = getOsmId(feature);
+
+  for (const candidate of features) {
+    if (candidate === feature) continue;
+    if (featureId !== undefined && getOsmId(candidate) === featureId) continue;
+    const currentDistance = distanceBetweenFeaturesMeters(feature, candidate);
+    if (currentDistance < best) {
+      best = currentDistance;
+      bestFeature = candidate;
+    }
+    if (best <= stopAtMeters) {
+      break;
+    }
+  }
+
+  return { distanceMeters: best, feature: bestFeature };
 }
 
 function nearestDistanceToFeatures(
@@ -361,27 +1155,105 @@ function nearestDistanceToFeatures(
   return { distanceMeters: best, feature: bestFeature };
 }
 
-function nearestRoadForPoint(
-  coordinate: LatLng,
-  roads: GeoJSONFeature[],
-  stopAtMeters: number,
-): { distanceMeters: number; osmId?: string | number } {
-  let best = Number.POSITIVE_INFINITY;
-  let osmId: string | number | undefined;
-  const pointFeature = point([coordinate.lng, coordinate.lat]);
-
-  for (const road of roads) {
-    const roadDistance = distanceToLineishFeatureMeters(pointFeature, road);
-    if (roadDistance < best) {
-      best = roadDistance;
-      osmId = getOsmId(road);
-    }
-    if (best <= stopAtMeters) {
-      break;
-    }
+function roadEndsNearFeatureDistance(
+  roadFeature: GeoJSONFeature,
+  contextFeatures: GeoJSONFeature[],
+  maxMeters: number,
+): { distanceMeters: number; feature?: GeoJSONFeature } {
+  const endpoints = firstLineEndpoints(roadFeature);
+  if (!endpoints) {
+    return nearestFeatureDistance(roadFeature, contextFeatures, maxMeters);
   }
 
-  return { distanceMeters: best, osmId };
+  const first = nearestDistanceToFeatures(endpoints[0], contextFeatures, maxMeters);
+  const last = nearestDistanceToFeatures(endpoints[1], contextFeatures, maxMeters);
+  return first.distanceMeters <= last.distanceMeters ? first : last;
+}
+
+function pathConnectionMetrics(
+  pathFeature: GeoJSONFeature,
+  groupA: GeoJSONFeature[],
+  groupB: GeoJSONFeature[],
+  groupAMeters: number,
+  groupBMeters: number,
+): { connected: boolean; distanceMeters: number } {
+  const endpoints = firstLineEndpoints(pathFeature);
+  if (!endpoints) return { connected: false, distanceMeters: Number.POSITIVE_INFINITY };
+
+  const firstA = nearestDistanceToFeatures(endpoints[0], groupA, groupAMeters);
+  const lastB = nearestDistanceToFeatures(endpoints[1], groupB, groupBMeters);
+  const firstB = nearestDistanceToFeatures(endpoints[0], groupB, groupBMeters);
+  const lastA = nearestDistanceToFeatures(endpoints[1], groupA, groupAMeters);
+
+  const forward =
+    firstA.distanceMeters <= groupAMeters &&
+    lastB.distanceMeters <= groupBMeters &&
+    differentFeature(firstA.feature, lastB.feature);
+  const reverse =
+    firstB.distanceMeters <= groupBMeters &&
+    lastA.distanceMeters <= groupAMeters &&
+    differentFeature(firstB.feature, lastA.feature);
+
+  if (forward) {
+    return { connected: true, distanceMeters: Math.max(firstA.distanceMeters, lastB.distanceMeters) };
+  }
+  if (reverse) {
+    return { connected: true, distanceMeters: Math.max(firstB.distanceMeters, lastA.distanceMeters) };
+  }
+  return { connected: false, distanceMeters: Number.POSITIVE_INFINITY };
+}
+
+function endpointsNearDifferentFeatures(
+  pathFeature: GeoJSONFeature,
+  candidates: GeoJSONFeature[],
+  maxMeters: number,
+): { connected: boolean; distanceMeters: number } {
+  const endpoints = firstLineEndpoints(pathFeature);
+  if (!endpoints) return { connected: false, distanceMeters: Number.POSITIVE_INFINITY };
+
+  const first = nearestDistanceToFeatures(endpoints[0], candidates, maxMeters);
+  const last = nearestDistanceToFeatures(endpoints[1], candidates, maxMeters);
+  return {
+    connected:
+      first.distanceMeters <= maxMeters &&
+      last.distanceMeters <= maxMeters &&
+      differentFeature(first.feature, last.feature),
+    distanceMeters: Math.max(first.distanceMeters, last.distanceMeters),
+  };
+}
+
+function differentFeature(a?: GeoJSONFeature, b?: GeoJSONFeature): boolean {
+  if (!a || !b) return false;
+  const aId = getOsmId(a);
+  const bId = getOsmId(b);
+  return aId === undefined || bId === undefined ? a !== b : aId !== bId;
+}
+
+function countFeaturesWithin(
+  feature: GeoJSONFeature,
+  contextFeatures: GeoJSONFeature[],
+  maxMeters: number,
+): number {
+  let count = 0;
+  for (const candidate of contextFeatures) {
+    if (distanceBetweenFeaturesMeters(feature, candidate) <= maxMeters) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function distanceBetweenFeaturesMeters(a: GeoJSONFeature, b: GeoJSONFeature): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (const coordinate of sampleFeatureCoordinates(a, 8)) {
+    best = Math.min(best, distanceFromCoordinateToFeatureMeters(coordinate, b));
+    if (best === 0) return 0;
+  }
+  for (const coordinate of sampleFeatureCoordinates(b, 8)) {
+    best = Math.min(best, distanceFromCoordinateToFeatureMeters(coordinate, a));
+    if (best === 0) return 0;
+  }
+  return best;
 }
 
 function distanceFromCoordinateToFeatureMeters(
@@ -395,11 +1267,21 @@ function distanceFromCoordinateToFeatureMeters(
     return distance(pointFeature, geometry.coordinates, { units: "kilometers" }) * 1000;
   }
 
-  if (geometry.type === "Polygon") {
-    const polygon = feature as Feature<Polygon>;
+  if (geometry.type === "MultiPoint") {
+    return Math.min(
+      ...geometry.coordinates.map(
+        (featureCoordinate) =>
+          distance(pointFeature, featureCoordinate, { units: "kilometers" }) * 1000,
+      ),
+    );
+  }
+
+  if (geometry.type === "Polygon" || geometry.type === "MultiPolygon") {
+    const polygon = feature as Feature<Polygon | MultiPolygon>;
     if (booleanPointInPolygon(pointFeature, polygon)) {
       return 0;
     }
+    return distanceToPolygonBoundaryMeters(pointFeature, geometry);
   }
 
   if (geometry.type === "LineString" || geometry.type === "MultiLineString") {
@@ -410,6 +1292,31 @@ function distanceFromCoordinateToFeatureMeters(
   return distance(pointFeature, center, { units: "kilometers" }) * 1000;
 }
 
+function distanceToPolygonBoundaryMeters(
+  pointFeature: Feature<Point>,
+  geometry: Polygon | MultiPolygon,
+): number {
+  const rings =
+    geometry.type === "Polygon"
+      ? geometry.coordinates
+      : geometry.coordinates.flatMap((polygonCoordinates) => polygonCoordinates);
+
+  if (rings.length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return Math.min(
+    ...rings
+      .filter((ring) => ring.length >= 2)
+      .map(
+        (ring) =>
+          pointToLineDistance(pointFeature, lineString(ring), {
+            units: "kilometers",
+          }) * 1000,
+      ),
+  );
+}
+
 function distanceToLineishFeatureMeters(
   pointFeature: Feature<Point>,
   feature: GeoJSONFeature,
@@ -418,20 +1325,122 @@ function distanceToLineishFeatureMeters(
 
   if (geometry.type === "LineString") {
     const line = feature as Feature<LineString>;
-    nearestPointOnLine(line, pointFeature, { units: "kilometers" });
     return pointToLineDistance(pointFeature, line, { units: "kilometers" }) * 1000;
   }
 
   if (geometry.type === "MultiLineString") {
+    if (geometry.coordinates.length === 0) return Number.POSITIVE_INFINITY;
     return Math.min(
-      ...geometry.coordinates.map((coordinates) =>
-        pointToLineDistance(pointFeature, lineString(coordinates), {
-          units: "kilometers",
-        }) * 1000,
+      ...geometry.coordinates.map(
+        (coordinates) =>
+          pointToLineDistance(pointFeature, lineString(coordinates), {
+            units: "kilometers",
+          }) * 1000,
       ),
     );
   }
 
   const center = representativeCoordinate(feature);
   return distance(pointFeature, [center.lng, center.lat], { units: "kilometers" }) * 1000;
+}
+
+function sampleFeatureCoordinates(feature: GeoJSONFeature, maxSamples: number): LatLng[] {
+  const positions = flattenPositions(feature.geometry).filter(
+    (position) => Number.isFinite(position[0]) && Number.isFinite(position[1]),
+  );
+  const samples: LatLng[] = [representativeCoordinate(feature)];
+
+  if (positions.length === 0) {
+    return samples;
+  }
+
+  const step = Math.max(1, Math.floor(positions.length / Math.max(1, maxSamples - 1)));
+  for (let index = 0; index < positions.length && samples.length < maxSamples; index += step) {
+    const position = positions[index];
+    samples.push({ lat: position[1], lng: position[0] });
+  }
+
+  const last = positions[positions.length - 1];
+  if (samples.length < maxSamples) {
+    samples.push({ lat: last[1], lng: last[0] });
+  }
+
+  return samples;
+}
+
+function flattenPositions(geometry: Geometry): Position[] {
+  switch (geometry.type) {
+    case "Point":
+      return [geometry.coordinates];
+    case "MultiPoint":
+    case "LineString":
+      return geometry.coordinates;
+    case "MultiLineString":
+    case "Polygon":
+      return geometry.coordinates.flat();
+    case "MultiPolygon":
+      return geometry.coordinates.flat(2);
+    case "GeometryCollection":
+      return geometry.geometries.flatMap(flattenPositions);
+  }
+}
+
+function treeEvidence(
+  road: GeoJSONFeature,
+  context: SpatialContext,
+): { matched: boolean; distanceMeters: number; detail: string } {
+  const tags = getFeatureTags(road);
+  if (tags.tree_lined && tags.tree_lined !== "no") {
+    return {
+      matched: true,
+      distanceMeters: 0,
+      detail: `Direct tree_lined=${tags.tree_lined}; estimated tree-lined length at least ${formatMeters(TREE_LINED_REQUIRED_METERS)}.`,
+    };
+  }
+
+  const tree = nearestFeatureDistance(road, context.trees, TREE_CONTEXT_DISTANCE_METERS);
+  if (tree.distanceMeters <= TREE_CONTEXT_DISTANCE_METERS) {
+    return {
+      matched: true,
+      distanceMeters: tree.distanceMeters,
+      detail: `Nearby tree/tree_row evidence within ${formatMeters(tree.distanceMeters)}; approximate tree-lined length is heuristic.`,
+    };
+  }
+
+  const woods = nearestFeatureDistance(road, context.woods, TREE_CONTEXT_DISTANCE_METERS);
+  if (woods.distanceMeters <= TREE_CONTEXT_DISTANCE_METERS) {
+    return {
+      matched: true,
+      distanceMeters: woods.distanceMeters,
+      detail: `Nearby woods/forest evidence within ${formatMeters(woods.distanceMeters)}; approximate tree-lined length is heuristic.`,
+    };
+  }
+
+  return {
+    matched: false,
+    distanceMeters: Number.POSITIVE_INFINITY,
+    detail: "No tree-lined evidence found.",
+  };
+}
+
+function finiteDistance(distanceMeters: number): number | undefined {
+  return Number.isFinite(distanceMeters) ? distanceMeters : undefined;
+}
+
+function formatMeters(distanceMeters: number): string {
+  if (!Number.isFinite(distanceMeters)) {
+    return `none within ${NO_BUILDINGS_DISTANCE_METERS.toFixed(1)} m`;
+  }
+  return distanceMeters < 10 ? `${distanceMeters.toFixed(1)} m` : `${Math.round(distanceMeters)} m`;
+}
+
+function tagDetail(tags: Record<string, string>, keys: string[]): string {
+  const parts = keys
+    .filter((key) => tags[key] !== undefined)
+    .map((key) => `${key}=${tags[key]}`);
+  return parts.length > 0 ? parts.join("; ") : "No priority tags present.";
+}
+
+function parkingDetail(tags: Record<string, string>): string {
+  return tagDetail(tags, [...STREET_PARKING_KEYS, "access"]);
 }

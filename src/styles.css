@@ -371,6 +371,49 @@ dd {
   grid-template-columns: 1fr;
 }
 
+.match-meta {
+  display: inline-block;
+  margin-left: 0.45rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.match-detail {
+  margin: 0.65rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.external-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.75rem 0 0;
+}
+
+.external-link {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #c7d2e2;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1a73e8;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.external-link:hover,
+.external-link:focus-visible {
+  background: #f0f6ff;
+  border-color: #1a73e8;
+  text-decoration: underline;
+}
+
 .tag-list {
   display: flex;
   flex-wrap: wrap;

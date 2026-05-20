@@ -125,7 +125,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [locationStatus, setLocationStatus] = useState("Scoped to Washington, DC.");
   const [placeSuggestions, setPlaceSuggestions] = useState<PlaceSuggestion[]>([]);
   const [suggestionsStatus, setSuggestionsStatus] = useState<string | null>(null);
-  const [presetId, setPresetId] = useState<PresetId>("road-adjacent-parking");
+  const [presetId, setPresetId] = useState<PresetId>("preset-01");
   const [showBuildings, setShowBuildings] = useState(false);
   const [showWater, setShowWater] = useState(true);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
@@ -1096,6 +1096,8 @@ function FeaturePanel({
   streetViewState: StreetViewState;
 }) {
   const tagRows = summarizeTags(selectedFeature.tags, 10);
+  const address = buildAddressFromTags(selectedFeature.tags);
+  const externalLinks = buildExternalLinks(selectedFeature.coordinate, address);
 
   return (
     <section className="feature-panel">
@@ -1112,11 +1114,40 @@ function FeaturePanel({
           <dt>Coordinate</dt>
           <dd>{formatCoordinate(selectedFeature.coordinate)}</dd>
         </div>
+        {address ? (
+          <div>
+            <dt>Address</dt>
+            <dd>{address}</dd>
+          </div>
+        ) : null}
         <div>
           <dt>Match</dt>
-          <dd>{selectedFeature.matchReason.label}</dd>
+          <dd>
+            {selectedFeature.matchReason.label}
+            {selectedFeature.matchReason.distanceMeters !== undefined ? (
+              <span className="match-meta">
+                {formatMetersForUi(selectedFeature.matchReason.distanceMeters)}
+              </span>
+            ) : null}
+          </dd>
         </div>
       </dl>
+      {selectedFeature.matchReason.detail ? (
+        <p className="match-detail">{selectedFeature.matchReason.detail}</p>
+      ) : null}
+      <div className="external-links" aria-label="Open this location in external services">
+        {externalLinks.map((link) => (
+          <a
+            key={link.label}
+            href={link.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="external-link"
+          >
+            {link.label}
+          </a>
+        ))}
+      </div>
       {tagRows.length > 0 ? (
         <ul className="tag-list">
           {tagRows.map((tag) => (
@@ -1127,6 +1158,58 @@ function FeaturePanel({
       <StreetViewStatus state={streetViewState} />
     </section>
   );
+}
+
+function buildAddressFromTags(tags: Record<string, string>): string | null {
+  const housenumber = tags["addr:housenumber"]?.trim();
+  const street = tags["addr:street"]?.trim();
+  const city = tags["addr:city"]?.trim();
+  const state = tags["addr:state"]?.trim();
+  const postcode = tags["addr:postcode"]?.trim();
+  const fullAddress = tags["addr:full"]?.trim();
+
+  if (fullAddress) {
+    return fullAddress;
+  }
+
+  const streetLine = [housenumber, street].filter(Boolean).join(" ");
+  const cityLine = [city, state].filter(Boolean).join(", ");
+  const lines = [streetLine, cityLine, postcode].filter(Boolean);
+  return lines.length > 0 ? lines.join(", ") : null;
+}
+
+function buildExternalLinks(
+  coordinate: LatLng,
+  address: string | null,
+): { label: string; url: string }[] {
+  const lat = coordinate.lat.toFixed(6);
+  const lng = coordinate.lng.toFixed(6);
+  const coordQuery = `${lat},${lng}`;
+  const query = address ?? coordQuery;
+  const encoded = encodeURIComponent(query);
+
+  return [
+    {
+      label: "Google Maps",
+      url: `https://www.google.com/maps/search/?api=1&query=${encoded}`,
+    },
+    {
+      label: "Zillow",
+      url: `https://www.zillow.com/homes/${encoded}_rb/`,
+    },
+    {
+      label: "Redfin",
+      url: `https://www.redfin.com/zipcode/?location=${encoded}`,
+    },
+    {
+      label: "Realtor.com",
+      url: `https://www.realtor.com/realestateandhomes-search/${encoded}`,
+    },
+    {
+      label: "LoopNet",
+      url: `https://www.loopnet.com/search/?sk=${encoded}`,
+    },
+  ];
 }
 
 function StreetViewStatus({ state }: { state: StreetViewState }) {
@@ -1267,7 +1350,7 @@ function computeDifficultyEstimate(
     level,
     label: labelForDifficulty(level),
     detail:
-      preset.id === "road-to-road-walking-trail"
+      preset.id === "preset-11"
         ? "This preset is the heaviest option because it scans pedestrian ways, roads, and endpoint proximity."
         : "Premade scouting queries scan multiple OSM tags and may run spatial filters after Overpass returns data.",
     scope,
@@ -1327,7 +1410,12 @@ function estimatePresetLevel(
     return "high";
   }
 
-  if (presetId === "road-to-road-walking-trail") {
+  if (
+    presetId === "preset-11" ||
+    presetId === "preset-27" ||
+    presetId === "preset-28" ||
+    presetId === "preset-31"
+  ) {
     if (visibleDiagonalKm > 2.5) return "very-high";
     if (visibleDiagonalKm > 1.2) return "high";
     return "moderate";
@@ -1375,6 +1463,12 @@ function formatDistanceKm(distanceKm: number): string {
   }
 
   return `${distanceKm.toFixed(distanceKm < 10 ? 1 : 0)} km`;
+}
+
+function formatMetersForUi(distanceMeters: number): string {
+  return distanceMeters < 10
+    ? `${distanceMeters.toFixed(1)} m`
+    : `${Math.round(distanceMeters)} m`;
 }
 
 function normalizeMapTypeId(mapTypeId: string | undefined): MapDisplayType {
@@ -1517,6 +1611,11 @@ function colorForCategory(category: ScoutCategory, role: ScoutRole): string {
   if (role === "context-water") return "#228be6";
   if (role === "context-road") return "#4c6ef5";
   if (role === "context-parking") return "#845ef7";
+  if (role === "context-woods") return "#2b8a3e";
+  if (role === "context-park") return "#40c057";
+  if (role === "context-pull-off") return "#7950f2";
+  if (role === "context-trail") return "#37b24d";
+  if (role === "context-industrial") return "#868e96";
 
   switch (category) {
     case "road":
@@ -1533,6 +1632,18 @@ function colorForCategory(category: ScoutCategory, role: ScoutRole): string {
       return "#7a7f87";
     case "water-crossing":
       return "#0ca678";
+    case "woods":
+      return "#2b8a3e";
+    case "park":
+      return "#40c057";
+    case "pull-off":
+      return "#7950f2";
+    case "barrier":
+      return "#c92a2a";
+    case "industrial":
+      return "#868e96";
+    case "off-road":
+      return "#7048e8";
     case "simple":
     default:
       return "#d6336c";
