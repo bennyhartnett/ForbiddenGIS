@@ -5,8 +5,10 @@ import {
   googleBoundsToBBox,
   selectedFeatureFromProperties,
   summarizeTags,
+  type BBox,
   type GeoJSONFeatureCollection,
   type LatLng,
+  type PresetDefinition,
   type PresetId,
   type ScoutCategory,
   type ScoutFeatureProperties,
@@ -38,6 +40,14 @@ import {
 
 type Mode = "simple" | "preset";
 type MapDisplayType = "roadmap" | "satellite" | "hybrid" | "terrain";
+type DifficultyLevel = "blocked" | "low" | "moderate" | "high" | "very-high";
+
+interface DifficultyEstimate {
+  level: DifficultyLevel;
+  label: string;
+  detail: string;
+  scope: string;
+}
 
 type StreetViewState =
   | { status: "idle" }
@@ -57,8 +67,9 @@ const SIMPLE_PRESETS = [
 ];
 
 const RENDER_LIMIT = 5000;
-const DEFAULT_CENTER: LatLng = { lat: 40.7128, lng: -74.006 };
-const DEFAULT_ZOOM = 13;
+const DEFAULT_CENTER: LatLng = { lat: 38.9072, lng: -77.0369 };
+const DEFAULT_ZOOM = 15;
+const DEFAULT_LOCATION_QUERY = "Washington, DC";
 
 export default function App() {
   const apiKey = getGoogleMapsApiKey();
@@ -77,6 +88,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const mapRef = useRef<google.maps.Map | null>(null);
   const mapsRef = useRef<typeof google | null>(null);
   const streetViewServiceRef = useRef<google.maps.StreetViewService | null>(null);
+  const geocoderRef = useRef<google.maps.Geocoder | null>(null);
   const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const lastRequestKeyRef = useRef<string | null>(null);
@@ -91,11 +103,14 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
   const [mode, setMode] = useState<Mode>("simple");
   const [tagFilter, setTagFilter] = useState("amenity=restaurant");
+  const [locationQuery, setLocationQuery] = useState(DEFAULT_LOCATION_QUERY);
+  const [locationStatus, setLocationStatus] = useState("Scoped to Washington, DC.");
   const [presetId, setPresetId] = useState<PresetId>("road-adjacent-parking");
   const [showBuildings, setShowBuildings] = useState(false);
   const [showWater, setShowWater] = useState(true);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [mapType, setMapType] = useState<MapDisplayType>("roadmap");
+  const [visibleDiagonalKm, setVisibleDiagonalKm] = useState<number | null>(null);
   const [boundsWarning, setBoundsWarning] = useState<string | null>(null);
   const [searchWarning, setSearchWarning] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -109,6 +124,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
   const selectedPreset = useMemo(() => getPresetById(presetId), [presetId]);
   const activeWarning = searchWarning ?? boundsWarning;
+  const difficultyEstimate = useMemo(
+    () => computeDifficultyEstimate(mode, zoom, tagFilter, selectedPreset, visibleDiagonalKm),
+    [mode, selectedPreset, tagFilter, visibleDiagonalKm, zoom],
+  );
 
   useEffect(() => {
     searchGateRef.current = {
@@ -119,7 +138,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
     const map = mapRef.current;
     if (map) {
-      setBoundsWarning(mapBoundsWarning(map, mode, tagFilter, selectedPreset.minZoom));
+      syncLiveMapState(map, mode, tagFilter, selectedPreset.minZoom, setZoom, setVisibleDiagonalKm, setBoundsWarning);
     }
   }, [mode, selectedPreset.minZoom, tagFilter]);
 
@@ -250,15 +269,14 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       return;
     }
 
-    const bounds = map.getBounds();
     const currentZoom = map.getZoom() ?? 0;
+    const bbox = getCurrentMapBBox(map);
 
-    if (!bounds) {
-      setError("Move the map slightly so bounds are available, then search again.");
+    if (!bbox) {
+      setError("Move or zoom the map slightly so a search area is available, then search again.");
       return;
     }
 
-    const bbox = googleBoundsToBBox(bounds);
     const gate = validateSearchGate(mode, currentZoom, tagFilter, selectedPreset.minZoom);
     if (gate) {
       setError(gate);
@@ -393,6 +411,68 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     );
   }, [runStreetViewLookup]);
 
+  const scopeToLocation = useCallback(
+    (queryOverride?: string) => {
+      const map = mapRef.current;
+      const geocoder = geocoderRef.current;
+      const query = (queryOverride ?? locationQuery).trim();
+
+      if (!map || !geocoder) {
+        setError("Location search is not ready yet.");
+        return;
+      }
+
+      if (!query) {
+        setError("Enter a city, address, place, or coordinates to scope the map.");
+        return;
+      }
+
+      setError(null);
+      setLocationStatus(`Finding ${query}...`);
+
+      geocoder.geocode({ address: query }, (results, status) => {
+        const result = results?.[0];
+
+        if (status !== "OK" || !result) {
+          setLocationStatus("Location not found.");
+          setError("Could not find that location. Try a more specific place name or address.");
+          return;
+        }
+
+        if (result.geometry.viewport) {
+          map.fitBounds(result.geometry.viewport);
+        } else {
+          map.setCenter(result.geometry.location);
+          map.setZoom(Math.max(map.getZoom() ?? DEFAULT_ZOOM, 14));
+        }
+
+        window.setTimeout(() => {
+          if ((map.getZoom() ?? 0) < 13) {
+            map.setZoom(13);
+          }
+        }, 0);
+
+        const formatted = result.formatted_address ?? query;
+        setLocationQuery(formatted);
+        setLocationStatus(`Scoped to ${formatted}.`);
+      });
+    },
+    [locationQuery],
+  );
+
+  const scopeToWashingtonDc = useCallback(() => {
+    setLocationQuery(DEFAULT_LOCATION_QUERY);
+    const map = mapRef.current;
+
+    if (map) {
+      map.setCenter(DEFAULT_CENTER);
+      map.setZoom(DEFAULT_ZOOM);
+    }
+
+    setLocationStatus("Scoped to Washington, DC.");
+    setError(null);
+  }, []);
+
   const zoomMap = useCallback((delta: number) => {
     const map = mapRef.current;
     if (!map) {
@@ -473,7 +553,21 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
         mapRef.current = map;
         streetViewServiceRef.current = new maps.maps.StreetViewService();
+        geocoderRef.current = new maps.maps.Geocoder();
         map.data.setStyle((feature) => styleForDataFeature(maps, feature));
+        const syncCurrentMapState = () => {
+          const gate = searchGateRef.current;
+          syncLiveMapState(
+            map,
+            gate.mode,
+            gate.tagFilter,
+            gate.presetMinZoom,
+            setZoom,
+            setVisibleDiagonalKm,
+            setBoundsWarning,
+          );
+        };
+
         listeners.push(
           map.data.addListener("click", (event: google.maps.Data.MouseEvent) => {
             dataFeatureClickRef.current(event.feature);
@@ -481,15 +575,11 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           map.addListener("maptypeid_changed", () => {
             setMapType(normalizeMapTypeId(map.getMapTypeId()));
           }),
-          map.addListener("idle", () => {
-            const nextZoom = map.getZoom() ?? DEFAULT_ZOOM;
-            const gate = searchGateRef.current;
-            setZoom(nextZoom);
-            setBoundsWarning(
-              mapBoundsWarning(map, gate.mode, gate.tagFilter, gate.presetMinZoom),
-            );
-          }),
+          map.addListener("idle", syncCurrentMapState),
+          map.addListener("bounds_changed", syncCurrentMapState),
         );
+        window.setTimeout(syncCurrentMapState, 250);
+        window.setTimeout(syncCurrentMapState, 1500);
         setMapStatus("Map ready");
       } catch (mapError) {
         setMapStatus("Google Maps failed to load.");
@@ -541,6 +631,32 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
             {mapStatus} <span aria-label={`Current zoom ${zoom}`}>Zoom {zoom}</span>
           </p>
         </header>
+
+        <section className="control-section">
+          <form
+            className="location-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              scopeToLocation();
+            }}
+          >
+            <label htmlFor="location-search">Search and scope to location</label>
+            <input
+              id="location-search"
+              value={locationQuery}
+              onChange={(event) => setLocationQuery(event.target.value)}
+              placeholder="Washington, DC"
+              spellCheck={false}
+            />
+            <div className="inline-actions">
+              <button type="submit">Go to location</button>
+              <button type="button" onClick={scopeToWashingtonDc}>
+                Washington DC
+              </button>
+            </div>
+          </form>
+          <p className="query-summary">{locationStatus}</p>
+        </section>
 
         <section className="control-section">
           <label htmlFor="mode">Mode</label>
@@ -619,6 +735,17 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
             </label>
           </section>
         )}
+
+        <section className="difficulty-panel" aria-live="polite">
+          <div className="difficulty-heading">
+            <span>Compute difficulty</span>
+            <strong className={`difficulty-badge difficulty-${difficultyEstimate.level}`}>
+              {difficultyEstimate.label}
+            </strong>
+          </div>
+          <p>{difficultyEstimate.detail}</p>
+          <p className="muted">{difficultyEstimate.scope}</p>
+        </section>
 
         <section className="button-stack">
           <button type="button" className="primary-button" onClick={() => void handleSearch()}>
@@ -911,6 +1038,150 @@ function validateSearchGate(
   return null;
 }
 
+function syncLiveMapState(
+  map: google.maps.Map,
+  mode: Mode,
+  tagFilter: string,
+  presetMinZoom: number,
+  setZoomState: (zoom: number) => void,
+  setVisibleDiagonalKmState: (diagonalKm: number | null) => void,
+  setBoundsWarningState: (warning: string | null) => void,
+): void {
+  const bbox = getCurrentMapBBox(map);
+  setZoomState(map.getZoom() ?? DEFAULT_ZOOM);
+
+  if (!bbox) {
+    setVisibleDiagonalKmState(null);
+    setBoundsWarningState(null);
+    return;
+  }
+
+  const diagonalKm = bboxDiagonalKm(bbox);
+  setVisibleDiagonalKmState(diagonalKm);
+  setBoundsWarningState(mapBoundsWarning(map, mode, tagFilter, presetMinZoom));
+}
+
+function computeDifficultyEstimate(
+  mode: Mode,
+  zoom: number,
+  tagFilter: string,
+  preset: PresetDefinition,
+  visibleDiagonalKm: number | null,
+): DifficultyEstimate {
+  const scope =
+    visibleDiagonalKm === null
+      ? "Scope: waiting for map bounds."
+      : `Scope: about ${formatDistanceKm(visibleDiagonalKm)} across at zoom ${zoom}.`;
+
+  const gate = validateSearchGate(mode, zoom, tagFilter, preset.minZoom);
+  if (gate) {
+    return {
+      level: "blocked",
+      label: "Zoom in",
+      detail: gate,
+      scope,
+    };
+  }
+
+  if (mode === "simple") {
+    let parsed: ParsedTagFilter;
+    try {
+      parsed = parseTagFilter(tagFilter);
+    } catch (error) {
+      return {
+        level: "blocked",
+        label: "Invalid",
+        detail: error instanceof Error ? error.message : "Enter a valid key=value filter.",
+        scope,
+      };
+    }
+
+    const level = estimateSimpleLevel(parsed.wildcard, visibleDiagonalKm);
+    return {
+      level,
+      label: labelForDifficulty(level),
+      detail: parsed.wildcard
+        ? "Wildcard tag searches ask Overpass for every feature with that key, so zoom and map scope matter a lot."
+        : "Direct key=value searches are usually manageable when the visible area is tight.",
+      scope,
+    };
+  }
+
+  const level = estimatePresetLevel(preset.id, visibleDiagonalKm);
+  return {
+    level,
+    label: labelForDifficulty(level),
+    detail:
+      preset.id === "road-to-road-walking-trail"
+        ? "This preset is the heaviest option because it scans pedestrian ways, roads, and endpoint proximity."
+        : "Premade scouting queries scan multiple OSM tags and may run spatial filters after Overpass returns data.",
+    scope,
+  };
+}
+
+function estimateSimpleLevel(
+  wildcard: boolean,
+  visibleDiagonalKm: number | null,
+): DifficultyLevel {
+  if (visibleDiagonalKm === null) {
+    return wildcard ? "high" : "moderate";
+  }
+
+  if (wildcard) {
+    if (visibleDiagonalKm > 6) return "very-high";
+    if (visibleDiagonalKm > 3) return "high";
+    if (visibleDiagonalKm > 1.5) return "moderate";
+    return "low";
+  }
+
+  if (visibleDiagonalKm > 10) return "high";
+  if (visibleDiagonalKm > 5) return "moderate";
+  return "low";
+}
+
+function estimatePresetLevel(
+  presetId: PresetId,
+  visibleDiagonalKm: number | null,
+): DifficultyLevel {
+  if (visibleDiagonalKm === null) {
+    return "high";
+  }
+
+  if (presetId === "road-to-road-walking-trail") {
+    if (visibleDiagonalKm > 2.5) return "very-high";
+    if (visibleDiagonalKm > 1.2) return "high";
+    return "moderate";
+  }
+
+  if (visibleDiagonalKm > 5) return "very-high";
+  if (visibleDiagonalKm > 2.5) return "high";
+  if (visibleDiagonalKm > 1.2) return "moderate";
+  return "low";
+}
+
+function labelForDifficulty(level: DifficultyLevel): string {
+  switch (level) {
+    case "blocked":
+      return "Blocked";
+    case "low":
+      return "Low";
+    case "moderate":
+      return "Moderate";
+    case "high":
+      return "High";
+    case "very-high":
+      return "Very high";
+  }
+}
+
+function formatDistanceKm(distanceKm: number): string {
+  if (distanceKm < 1) {
+    return `${Math.round(distanceKm * 1000)} m`;
+  }
+
+  return `${distanceKm.toFixed(distanceKm < 10 ? 1 : 0)} km`;
+}
+
 function normalizeMapTypeId(mapTypeId: string | undefined): MapDisplayType {
   if (
     mapTypeId === "satellite" ||
@@ -924,16 +1195,68 @@ function normalizeMapTypeId(mapTypeId: string | undefined): MapDisplayType {
   return "roadmap";
 }
 
+function getCurrentMapBBox(map: google.maps.Map): BBox | null {
+  const bounds = map.getBounds();
+  if (bounds) {
+    return googleBoundsToBBox(bounds);
+  }
+
+  const center = map.getCenter();
+  if (!center) {
+    return null;
+  }
+
+  const mapDiv = map.getDiv();
+  return approximateBBoxFromCenter(
+    { lat: center.lat(), lng: center.lng() },
+    map.getZoom() ?? DEFAULT_ZOOM,
+    Math.max(mapDiv.clientWidth, 320),
+    Math.max(mapDiv.clientHeight, 240),
+  );
+}
+
+function approximateBBoxFromCenter(
+  center: LatLng,
+  zoom: number,
+  widthPx: number,
+  heightPx: number,
+): BBox {
+  const latitudeRadians = (center.lat * Math.PI) / 180;
+  const metersPerPixel =
+    (156543.03392 * Math.max(Math.cos(latitudeRadians), 0.01)) / 2 ** zoom;
+  const halfWidthKm = (metersPerPixel * widthPx) / 2000;
+  const halfHeightKm = (metersPerPixel * heightPx) / 2000;
+  const latDelta = halfHeightKm / 110.574;
+  const lngDelta = halfWidthKm / (111.32 * Math.max(Math.cos(latitudeRadians), 0.01));
+
+  return {
+    south: clampLatitude(center.lat - latDelta),
+    west: clampLongitude(center.lng - lngDelta),
+    north: clampLatitude(center.lat + latDelta),
+    east: clampLongitude(center.lng + lngDelta),
+  };
+}
+
+function clampLatitude(latitude: number): number {
+  return Math.max(-85, Math.min(85, latitude));
+}
+
+function clampLongitude(longitude: number): number {
+  if (longitude < -180) return -180;
+  if (longitude > 180) return 180;
+  return longitude;
+}
+
 function mapBoundsWarning(
   map: google.maps.Map,
   mode: Mode,
   tagFilter: string,
   presetMinZoom: number,
 ): string | null {
-  const bounds = map.getBounds();
+  const bbox = getCurrentMapBBox(map);
   const zoom = map.getZoom() ?? 0;
 
-  if (!bounds) {
+  if (!bbox) {
     return null;
   }
 
@@ -942,7 +1265,7 @@ function mapBoundsWarning(
     return gate;
   }
 
-  const diagonalKm = bboxDiagonalKm(googleBoundsToBBox(bounds));
+  const diagonalKm = bboxDiagonalKm(bbox);
   if (diagonalKm > (mode === "preset" ? 4 : 8)) {
     return "Large visible area. Searches may be slow; zoom in for cleaner results.";
   }
