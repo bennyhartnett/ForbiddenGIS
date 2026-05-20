@@ -2001,15 +2001,60 @@ function buildExternalLinks(
   const lat = coordinate.lat.toFixed(6);
   const lng = coordinate.lng.toFixed(6);
   const coordQuery = `${lat},${lng}`;
-  const query = address ?? coordQuery;
-  const encoded = encodeURIComponent(query);
+  const fallbackQuery = address ?? coordQuery;
+  const encodedFallback = encodeURIComponent(fallbackQuery);
+
+  const zipMatch = address?.match(/\b(\d{5})(?:-\d{4})?\b/);
+  const zipcode = zipMatch?.[1];
+
+  // Zillow/LoopNet expect dash-separated path segments without URI-encoded
+  // spaces or commas; otherwise they 404 to the homepage.
+  const dashSlug = address
+    ? address
+        .replace(/,/g, "")
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "")
+    : null;
+
+  // Realtor.com joins location parts with underscores and words with dashes.
+  const realtorSlug = address
+    ? address
+        .split(",")
+        .map((part) => part.trim().replace(/\s+/g, "-"))
+        .filter(Boolean)
+        .join("_")
+    : null;
 
   return [
-    { label: "Google Maps", url: `https://www.google.com/maps/search/?api=1&query=${encoded}` },
-    { label: "Zillow", url: `https://www.zillow.com/homes/${encoded}_rb/` },
-    { label: "Redfin", url: `https://www.redfin.com/zipcode/?location=${encoded}` },
-    { label: "Realtor", url: `https://www.realtor.com/realestateandhomes-search/${encoded}` },
-    { label: "LoopNet", url: `https://www.loopnet.com/search/?sk=${encoded}` },
+    {
+      label: "Google Maps",
+      url: `https://www.google.com/maps/search/?api=1&query=${encodedFallback}`,
+    },
+    {
+      label: "Zillow",
+      url: dashSlug
+        ? `https://www.zillow.com/homes/${encodeURIComponent(dashSlug)}_rb/`
+        : `https://www.zillow.com/homes/${lat},${lng}_ll/`,
+    },
+    {
+      label: "Redfin",
+      url: zipcode
+        ? `https://www.redfin.com/zipcode/${zipcode}`
+        : `https://www.redfin.com/?location=${encodedFallback}`,
+    },
+    {
+      label: "Realtor",
+      url: realtorSlug
+        ? `https://www.realtor.com/realestateandhomes-search/${encodeURIComponent(realtorSlug)}`
+        : `https://www.realtor.com/realestateandhomes-search/${lat},${lng}`,
+    },
+    {
+      label: "LoopNet",
+      url: dashSlug
+        ? `https://www.loopnet.com/search/commercial-real-estate/${encodeURIComponent(dashSlug.toLowerCase())}/for-sale/`
+        : `https://www.loopnet.com/search/commercial-real-estate/${lat},${lng}/for-sale/`,
+    },
   ];
 }
 
