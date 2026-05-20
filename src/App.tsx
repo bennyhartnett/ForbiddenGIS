@@ -117,7 +117,7 @@ const PRESET_CATEGORIES: PresetCategory[] = [
   {
     id: "barriers",
     label: "Barriers",
-    match: (preset) => /barrier|gated/i.test(preset.name),
+    match: (preset) => /barrier|gated|fence|train track/i.test(preset.name),
   },
 ];
 
