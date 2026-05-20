@@ -603,7 +603,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
     const diagonalKm = bboxDiagonalKm(bbox);
     setSearchWarning(
-      diagonalKm > (mode === "preset" ? 4 : 8)
+      diagonalKm > (mode === "preset" ? 12 : 20)
         ? "This map area is large; results may be slow or capped. Zoom in for a tighter scan."
         : null,
     );
@@ -2677,7 +2677,7 @@ function mapBoundsWarning(
   const gate = validateSearchGate(mode, zoom, tagFilter, presetMinZoom);
   if (gate) return gate;
   const diagonalKm = bboxDiagonalKm(bbox);
-  if (diagonalKm > (mode === "preset" ? 4 : 8)) {
+  if (diagonalKm > (mode === "preset" ? 12 : 20)) {
     return "Large visible area. Searches may be slow; zoom in for cleaner results.";
   }
   return null;
