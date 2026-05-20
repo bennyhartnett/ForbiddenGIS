@@ -37,6 +37,20 @@ export interface FeatureKindMeta {
 
 export const DEFAULT_ORANGE = "#fa7b17";
 export const DEFAULT_PRIVATE_ORANGE = "#c2410c";
+export const DEFAULT_PUBLIC_BLUE = "#1a73e8";
+export const DEFAULT_PRIVATE_RED = "#d93025";
+
+// Access-classified kinds use a fixed public=blue / private=red palette so the
+// legend and the map share an unambiguous meaning. These colors stay put even
+// when auto-contrast assigns palette colors to the other kinds in a result set.
+export const SEMANTIC_ACCESS_KINDS: ReadonlySet<FeatureKind> = new Set<FeatureKind>([
+  "road-public",
+  "road-private",
+  "off-road-public",
+  "off-road-private",
+  "parking-public",
+  "parking-private",
+]);
 
 export const FEATURE_KINDS: FeatureKindMeta[] = [
   { kind: "road-public", label: "Roads (public)", group: "result" },
@@ -81,12 +95,12 @@ export function featureKindGroup(kind: FeatureKind): "result" | "context" {
 }
 
 export const DEFAULT_FEATURE_COLORS: Record<FeatureKind, string> = {
-  "road-public": DEFAULT_ORANGE,
-  "road-private": DEFAULT_PRIVATE_ORANGE,
-  "off-road-public": DEFAULT_ORANGE,
-  "off-road-private": DEFAULT_PRIVATE_ORANGE,
-  "parking-public": DEFAULT_ORANGE,
-  "parking-private": DEFAULT_PRIVATE_ORANGE,
+  "road-public": DEFAULT_PUBLIC_BLUE,
+  "road-private": DEFAULT_PRIVATE_RED,
+  "off-road-public": DEFAULT_PUBLIC_BLUE,
+  "off-road-private": DEFAULT_PRIVATE_RED,
+  "parking-public": DEFAULT_PUBLIC_BLUE,
+  "parking-private": DEFAULT_PRIVATE_RED,
   trail: DEFAULT_ORANGE,
   bridge: DEFAULT_ORANGE,
   water: DEFAULT_ORANGE,
@@ -215,14 +229,24 @@ export function featureKindFor(
 export function autoContrastColors(
   presentKinds: ReadonlySet<FeatureKind>,
 ): Partial<Record<FeatureKind, string>> {
-  const ordered = FEATURE_KINDS.filter(
+  const allResultKinds = FEATURE_KINDS.filter(
     (meta) => meta.group === "result" && presentKinds.has(meta.kind),
   );
-  if (ordered.length <= 1) return {};
+  if (allResultKinds.length <= 1) return {};
+
+  // Reserve the semantic blue/red slots so palette colors never overlap with
+  // the public/private legend swatches users learn to expect.
+  const reservedPalette = HIGH_CONTRAST_PALETTE.filter(
+    (color) => color !== DEFAULT_PUBLIC_BLUE && color !== DEFAULT_PRIVATE_RED,
+  );
+
   const colors: Partial<Record<FeatureKind, string>> = {};
-  ordered.forEach((meta, index) => {
-    colors[meta.kind] = HIGH_CONTRAST_PALETTE[index % HIGH_CONTRAST_PALETTE.length];
-  });
+  let paletteIndex = 0;
+  for (const meta of allResultKinds) {
+    if (SEMANTIC_ACCESS_KINDS.has(meta.kind)) continue;
+    colors[meta.kind] = reservedPalette[paletteIndex % reservedPalette.length];
+    paletteIndex += 1;
+  }
   return colors;
 }
 

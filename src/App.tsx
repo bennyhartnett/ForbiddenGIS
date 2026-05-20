@@ -46,6 +46,11 @@ import {
   resolveFeatureColors,
   type FeatureKind,
 } from "./lib/featureColors";
+import {
+  exportFeatureCollection,
+  mergeFeatureCollections,
+  type ExportFormat,
+} from "./lib/exporters";
 
 type Mode = "preset" | "simple" | "raw";
 type MapDisplayType = "roadmap" | "satellite" | "hybrid" | "terrain";
@@ -167,6 +172,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const selectedDataFeatureRef = useRef<google.maps.Data.Feature | null>(null);
   const dataFeatureClickRef = useRef<(feature: google.maps.Data.Feature) => void>(() => undefined);
   const featureColorMapRef = useRef<Record<FeatureKind, string>>({ ...DEFAULT_FEATURE_COLORS });
+  const loadedFeaturesRef = useRef<GeoJSONFeatureCollection>({
+    type: "FeatureCollection",
+    features: [],
+  });
   const streetViewLookupIdRef = useRef(0);
   const searchGateRef = useRef({
     mode: "preset" as Mode,
@@ -212,6 +221,9 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   // Panel UI state
   const [presetPanelOpen, setPresetPanelOpen] = useState(true);
   const [layersPanelOpen, setLayersPanelOpen] = useState(false);
+  const [accumulateResults, setAccumulateResults] = useState(false);
+  const [loadedFeatureCount, setLoadedFeatureCount] = useState(0);
+  const [exportBusy, setExportBusy] = useState(false);
 
   // Search lifecycle
   const [boundsWarning, setBoundsWarning] = useState<string | null>(null);
@@ -532,6 +544,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       if (!map) return;
       clearDataLayer();
       map.data.addGeoJson(collection);
+      loadedFeaturesRef.current = collection;
+      setLoadedFeatureCount(collection.features.length);
       setPresentFeatureKinds(collectFeatureKinds(collection));
       const matches: SelectedFeature[] = [];
       for (const feature of collection.features) {
@@ -568,6 +582,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     setLastSearchDurationMs(null);
     setSearchOutcome("idle");
     searchStartedAtRef.current = null;
+    loadedFeaturesRef.current = { type: "FeatureCollection", features: [] };
+    setLoadedFeatureCount(0);
   }, [clearDataLayer, closeStreetView]);
 
   const handleSearch = useCallback(async () => {
@@ -691,10 +707,20 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
                 simpleMatchLabel: "Matched custom query",
               });
 
-      renderFeatures({ type: "FeatureCollection", features: result.features });
+      const newCollection: GeoJSONFeatureCollection = {
+        type: "FeatureCollection",
+        features: result.features,
+      };
+      const finalCollection = accumulateResults
+        ? mergeFeatureCollections(loadedFeaturesRef.current, newCollection)
+        : newCollection;
+
+      renderFeatures(finalCollection);
       setRawFeatureCount(overpass.rawFeatureCount);
-      setResultCount(result.resultCount);
-      setRenderedFeatureCount(result.features.length);
+      setResultCount(
+        accumulateResults ? finalCollection.features.length : result.resultCount,
+      );
+      setRenderedFeatureCount(finalCollection.features.length);
       setSearchWarning(result.warnings[0] ?? null);
       const startedAt = searchStartedAtRef.current;
       if (startedAt !== null) {
@@ -721,6 +747,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       }
     }
   }, [
+    accumulateResults,
     bufferScale,
     closeStreetView,
     loading,
@@ -732,6 +759,40 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     showWater,
     tagFilter,
   ]);
+
+  const handleExport = useCallback(
+    async (format: ExportFormat) => {
+      const collection = loadedFeaturesRef.current;
+      if (!collection.features.length) {
+        setError("Load some results before exporting.");
+        return;
+      }
+      setExportBusy(true);
+      setError(null);
+      try {
+        const stamp = new Date()
+          .toISOString()
+          .replace(/[:T]/g, "-")
+          .replace(/\..+$/, "");
+        await exportFeatureCollection(collection, format, {
+          basename: `overpass-scout-${stamp}`,
+          documentName: `Overpass Scout export · ${collection.features.length.toLocaleString()} feature${
+            collection.features.length === 1 ? "" : "s"
+          }`,
+          featureColors: effectiveFeatureColors,
+        });
+      } catch (exportError) {
+        setError(
+          exportError instanceof Error
+            ? exportError.message
+            : "Export failed. Try again or pick a different format.",
+        );
+      } finally {
+        setExportBusy(false);
+      }
+    },
+    [effectiveFeatureColors],
+  );
 
   const openMapCenterStreetView = useCallback(() => {
     const map = mapRef.current;
@@ -1019,6 +1080,11 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           elapsedMs={elapsedMs}
           lastSearchDurationMs={lastSearchDurationMs}
           searchOutcome={searchOutcome}
+          accumulate={accumulateResults}
+          onAccumulateChange={setAccumulateResults}
+          loadedFeatureCount={loadedFeatureCount}
+          exportBusy={exportBusy}
+          onExport={(format) => void handleExport(format)}
         />
 
         <LayersPanel
@@ -1280,6 +1346,11 @@ function PresetPanel(props: {
   elapsedMs: number;
   lastSearchDurationMs: number | null;
   searchOutcome: "idle" | "success" | "error";
+  accumulate: boolean;
+  onAccumulateChange: (value: boolean) => void;
+  loadedFeatureCount: number;
+  exportBusy: boolean;
+  onExport: (format: ExportFormat) => void;
 }) {
   return (
     <aside className={`panel preset-panel ${props.open ? "" : "collapsed"}`} aria-label="Scout queries">
@@ -1506,6 +1577,24 @@ function PresetPanel(props: {
             {props.difficulty.label}
           </span>
         </div>
+        <label className="accumulate-row">
+          <span className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={props.accumulate}
+              onChange={(event) => props.onAccumulateChange(event.target.checked)}
+            />
+            <span className="slider" />
+          </span>
+          <span>
+            Add to map
+            <small>
+              {props.accumulate
+                ? "New searches append to existing results (deduped by OSM id)."
+                : "New searches replace existing results."}
+            </small>
+          </span>
+        </label>
         <div className="action-row">
           <button
             type="button"
@@ -1522,6 +1611,11 @@ function PresetPanel(props: {
             Clear
           </button>
         </div>
+        <ExportRow
+          loadedFeatureCount={props.loadedFeatureCount}
+          exportBusy={props.exportBusy}
+          onExport={props.onExport}
+        />
         <dl className="stats-strip">
           <div>
             <dt>Results</dt>
@@ -1534,6 +1628,45 @@ function PresetPanel(props: {
         </dl>
       </div>
     </aside>
+  );
+}
+
+function ExportRow(props: {
+  loadedFeatureCount: number;
+  exportBusy: boolean;
+  onExport: (format: ExportFormat) => void;
+}) {
+  const disabled = props.exportBusy || props.loadedFeatureCount === 0;
+  const formats: { id: ExportFormat; label: string; title: string }[] = [
+    { id: "geojson", label: "GeoJSON", title: "Download as GeoJSON (.geojson)" },
+    { id: "kml", label: "KML", title: "Download as KML (.kml) for Google Earth, QGIS, etc." },
+    { id: "kmz", label: "KMZ", title: "Download as compressed KMZ (.kmz)" },
+  ];
+  return (
+    <div className="export-row" role="group" aria-label="Export loaded features">
+      <div className="export-row-head">
+        <span className="export-row-title">Export</span>
+        <span className="export-row-count">
+          {props.loadedFeatureCount.toLocaleString()} loaded
+        </span>
+      </div>
+      <div className="export-row-buttons">
+        {formats.map((format) => (
+          <button
+            key={format.id}
+            type="button"
+            className="ghost-button export-button"
+            onClick={() => props.onExport(format.id)}
+            disabled={disabled}
+            title={format.title}
+            aria-label={format.title}
+          >
+            {props.exportBusy ? <SpinnerIcon /> : <DownloadIcon />}
+            {format.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1748,8 +1881,8 @@ function LayersPanel(props: {
             <span>
               High-contrast multi-type
               <small>
-                When results include more than one type (e.g., public vs private roads), give each
-                a distinct color.
+                Assigns distinct palette colors to non-road kinds when multiple types appear.
+                Public roads stay blue and private roads stay red.
               </small>
             </span>
             <span className="toggle-switch">
@@ -2242,6 +2375,16 @@ function ChevronUpIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="m6 15 6-6 6 6" />
+    </svg>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 4v11" />
+      <path d="m7 11 5 5 5-5" />
+      <path d="M5 20h14" />
     </svg>
   );
 }
