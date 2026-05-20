@@ -232,6 +232,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const searchStartedAtRef = useRef<number | null>(null);
   const [selectedFeature, setSelectedFeature] = useState<SelectedFeature | null>(null);
   const [streetViewState, setStreetViewState] = useState<StreetViewState>({ status: "idle" });
+  const [resultFeatures, setResultFeatures] = useState<SelectedFeature[]>([]);
+  const [matchListOpen, setMatchListOpen] = useState(false);
 
   const selectedPreset = useMemo(() => getPresetById(presetId), [presetId]);
   const activeWarning = searchWarning ?? boundsWarning;
@@ -482,6 +484,52 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
   dataFeatureClickRef.current = selectDataFeature;
 
+  const focusMatch = useCallback(
+    (match: SelectedFeature) => {
+      const map = mapRef.current;
+      if (!map) return;
+      map.panTo(match.coordinate);
+      const currentZoom = map.getZoom() ?? DEFAULT_ZOOM;
+      const FOCUS_MIN_ZOOM = 17;
+      if (currentZoom < FOCUS_MIN_ZOOM) {
+        map.setZoom(FOCUS_MIN_ZOOM);
+      }
+      let dataFeature: google.maps.Data.Feature | null = null;
+      map.data.forEach((feature) => {
+        if (dataFeature) return;
+        const id = feature.getProperty("scoutId");
+        const role = feature.getProperty("scoutRole");
+        if (id === match.scoutId && role === "result") {
+          dataFeature = feature;
+        }
+      });
+      if (dataFeature) {
+        selectDataFeature(dataFeature);
+      } else {
+        selectedDataFeatureRef.current?.setProperty("scoutSelected", false);
+        selectedDataFeatureRef.current = null;
+        setSelectedFeature(match);
+        void runStreetViewLookup(match.coordinate, match.name);
+      }
+    },
+    [runStreetViewLookup, selectDataFeature],
+  );
+
+  const cycleMatch = useCallback(
+    (delta: number) => {
+      if (resultFeatures.length === 0) return;
+      const currentId = selectedFeature?.scoutId;
+      const currentIndex = currentId
+        ? resultFeatures.findIndex((match) => match.scoutId === currentId)
+        : -1;
+      const base = currentIndex >= 0 ? currentIndex : delta > 0 ? -1 : 0;
+      const next =
+        (base + delta + resultFeatures.length) % resultFeatures.length;
+      focusMatch(resultFeatures[next]);
+    },
+    [focusMatch, resultFeatures, selectedFeature],
+  );
+
   const renderFeatures = useCallback(
     (collection: GeoJSONFeatureCollection) => {
       const map = mapRef.current;
@@ -489,6 +537,16 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       clearDataLayer();
       map.data.addGeoJson(collection);
       setPresentFeatureKinds(collectFeatureKinds(collection));
+      const matches: SelectedFeature[] = [];
+      for (const feature of collection.features) {
+        const role = (feature.properties?.scoutRole ?? "result") as ScoutRole;
+        if (role !== "result") continue;
+        const summary = selectedFeatureFromProperties(
+          (feature.properties ?? {}) as ScoutFeatureProperties,
+        );
+        if (summary) matches.push(summary);
+      }
+      setResultFeatures(matches);
     },
     [clearDataLayer],
   );
@@ -500,6 +558,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     clearDataLayer();
     closeStreetView();
     setSelectedFeature(null);
+    setResultFeatures([]);
+    setMatchListOpen(false);
     setResultCount(0);
     setRenderedFeatureCount(0);
     setRawFeatureCount(null);
@@ -1028,10 +1088,42 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           {error ? <p className="notice error">{error}</p> : null}
         </div>
 
+        {resultFeatures.length > 0 && !matchListOpen ? (
+          <button
+            type="button"
+            className="match-browse-chip"
+            onClick={() => setMatchListOpen(true)}
+            aria-label={`Browse ${resultFeatures.length} matches`}
+          >
+            <ListIcon />
+            Browse {resultFeatures.length.toLocaleString()}{" "}
+            {resultFeatures.length === 1 ? "match" : "matches"}
+          </button>
+        ) : null}
+
+        {matchListOpen && resultFeatures.length > 0 ? (
+          <MatchListPanel
+            matches={resultFeatures}
+            selectedId={selectedFeature?.scoutId ?? null}
+            onSelect={focusMatch}
+            onClose={() => setMatchListOpen(false)}
+            onPrev={() => cycleMatch(-1)}
+            onNext={() => cycleMatch(1)}
+          />
+        ) : null}
+
         {selectedFeature ? (
           <FeatureCard
             selectedFeature={selectedFeature}
             streetViewState={streetViewState}
+            totalMatches={resultFeatures.length}
+            currentIndex={
+              resultFeatures.findIndex(
+                (match) => match.scoutId === selectedFeature.scoutId,
+              )
+            }
+            onPrev={() => cycleMatch(-1)}
+            onNext={() => cycleMatch(1)}
             onClose={() => {
               setSelectedFeature(null);
               selectedDataFeatureRef.current?.setProperty("scoutSelected", false);
@@ -1891,27 +1983,65 @@ function TimeDock({
 function FeatureCard({
   selectedFeature,
   streetViewState,
+  totalMatches,
+  currentIndex,
+  onPrev,
+  onNext,
   onClose,
 }: {
   selectedFeature: SelectedFeature;
   streetViewState: StreetViewState;
+  totalMatches: number;
+  currentIndex: number;
+  onPrev: () => void;
+  onNext: () => void;
   onClose: () => void;
 }) {
   const tagRows = summarizeTags(selectedFeature.tags, 10);
   const address = buildAddressFromTags(selectedFeature.tags);
   const externalLinks = buildExternalLinks(selectedFeature.coordinate, address);
+  const showCycle = totalMatches > 1;
+  const positionLabel =
+    showCycle && currentIndex >= 0
+      ? `${currentIndex + 1} of ${totalMatches.toLocaleString()}`
+      : null;
 
   return (
     <section className="feature-card" aria-label="Selected feature">
       <div className="feature-card-header">
         <div>
-          <p className="eyebrow">Selected location</p>
+          <p className="eyebrow">
+            Selected location
+            {positionLabel ? <span className="match-position"> · {positionLabel}</span> : null}
+          </p>
           <h2>{selectedFeature.name}</h2>
           <small>{formatCoordinate(selectedFeature.coordinate)}</small>
         </div>
-        <button type="button" className="panel-toggle" onClick={onClose} aria-label="Close">
-          <CloseIcon />
-        </button>
+        <div className="feature-card-actions">
+          {showCycle ? (
+            <div className="feature-card-cycle" role="group" aria-label="Cycle matches">
+              <button
+                type="button"
+                className="icon-button"
+                onClick={onPrev}
+                aria-label="Previous match"
+              >
+                <ChevronLeftIcon />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={onNext}
+                aria-label="Next match"
+              >
+                <ChevronRightIcon />
+              </button>
+            </div>
+          ) : null}
+          <button type="button" className="panel-toggle" onClick={onClose} aria-label="Close">
+            <CloseIcon />
+          </button>
+        </div>
       </div>
       <div className="feature-card-body">
         {address ? (
@@ -1957,6 +2087,102 @@ function FeatureCard({
         <StreetViewStatus state={streetViewState} />
       </div>
     </section>
+  );
+}
+
+/* ---------------- MatchListPanel ---------------- */
+
+function MatchListPanel({
+  matches,
+  selectedId,
+  onSelect,
+  onClose,
+  onPrev,
+  onNext,
+}: {
+  matches: SelectedFeature[];
+  selectedId: string | null;
+  onSelect: (match: SelectedFeature) => void;
+  onClose: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const selectedRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    selectedRef.current?.scrollIntoView({ block: "nearest" });
+  }, [selectedId]);
+
+  return (
+    <aside className="match-list-panel" aria-label="Match list">
+      <div className="match-list-header">
+        <div>
+          <p className="eyebrow">Matches</p>
+          <h2>
+            {matches.length.toLocaleString()}{" "}
+            {matches.length === 1 ? "result" : "results"}
+          </h2>
+        </div>
+        <div className="match-list-actions">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onPrev}
+            aria-label="Previous match"
+            disabled={matches.length < 2}
+          >
+            <ChevronLeftIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onNext}
+            aria-label="Next match"
+            disabled={matches.length < 2}
+          >
+            <ChevronRightIcon />
+          </button>
+          <button
+            type="button"
+            className="panel-toggle"
+            onClick={onClose}
+            aria-label="Close match list"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+      </div>
+      <ol className="match-list">
+        {matches.map((match, index) => {
+          const isSelected = match.scoutId === selectedId;
+          return (
+            <li key={match.scoutId}>
+              <button
+                ref={isSelected ? selectedRef : null}
+                type="button"
+                className={`match-list-item${isSelected ? " is-selected" : ""}`}
+                aria-pressed={isSelected}
+                onClick={() => onSelect(match)}
+              >
+                <span className="match-list-index">{index + 1}</span>
+                <span className="match-list-body">
+                  <span className="match-list-name">{match.name}</span>
+                  <span className="match-list-meta">
+                    {match.matchReason.label}
+                    {match.matchReason.distanceMeters !== undefined
+                      ? ` · ${formatMetersForUi(match.matchReason.distanceMeters)}`
+                      : ""}
+                  </span>
+                  <span className="match-list-coord">
+                    {formatCoordinate(match.coordinate)}
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </aside>
   );
 }
 
@@ -2036,6 +2262,17 @@ function ChevronLeftIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="m15 6-6 6 6 6" />
+    </svg>
+  );
+}
+
+function ListIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 6h13M8 12h13M8 18h13" />
+      <circle cx="4" cy="6" r="1" />
+      <circle cx="4" cy="12" r="1" />
+      <circle cx="4" cy="18" r="1" />
     </svg>
   );
 }
