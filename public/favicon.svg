@@ -1,15 +1,38 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <circle cx="32" cy="32" r="28" fill="#1e88e5"/>
-  <g fill="#43a047">
-    <path d="M14 24c4-2 9-1 11 2s-2 7-6 7-9-6-5-9z"/>
-    <path d="M38 18c3 0 7 3 6 6s-5 2-7 0-2-6 1-6z"/>
-    <path d="M40 36c5-1 11 2 11 7s-8 8-12 5-4-11 1-12z"/>
-    <path d="M22 44c3 1 6 5 4 8s-7 1-8-2 1-7 4-6z"/>
+  <defs>
+    <radialGradient id="ocean" cx="38%" cy="34%" r="68%">
+      <stop offset="0%" stop-color="#5fc8ff"/>
+      <stop offset="55%" stop-color="#1976d2"/>
+      <stop offset="100%" stop-color="#0a275e"/>
+    </radialGradient>
+    <radialGradient id="shine" cx="32%" cy="26%" r="22%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="globeClip">
+      <circle cx="32" cy="32" r="28"/>
+    </clipPath>
+  </defs>
+
+  <circle cx="32" cy="32" r="28" fill="url(#ocean)"/>
+
+  <g clip-path="url(#globeClip)">
+    <g fill="#7cc275">
+      <path d="M9 22c2-3 5-4 9-3s4 4 7 4 5-3 8-2 1 5 4 6 6-1 7 2-3 5-7 5-7-2-10-1-3 4-7 4-6-3-9-5-4-7-2-10z"/>
+      <path d="M22 41c3-1 6 1 8 4s4 6 2 9-7 1-9-2-4-10-1-11z"/>
+      <path d="M44 36c3-2 8-1 9 2s-2 7-5 7-7-7-4-9z"/>
+      <path d="M50 18c2 0 4 2 3 4s-4 1-5-1-1-3 2-3z"/>
+    </g>
+    <g fill="none" stroke="#ffffff" stroke-width="0.6" opacity="0.32">
+      <line x1="4" y1="32" x2="60" y2="32"/>
+      <ellipse cx="32" cy="32" rx="28" ry="9"/>
+      <ellipse cx="32" cy="32" rx="28" ry="18"/>
+      <line x1="32" y1="4" x2="32" y2="60"/>
+      <ellipse cx="32" cy="32" rx="9" ry="28"/>
+      <ellipse cx="32" cy="32" rx="18" ry="28"/>
+    </g>
   </g>
-  <g fill="none" stroke="#0d47a1" stroke-width="2">
-    <circle cx="32" cy="32" r="28"/>
-    <ellipse cx="32" cy="32" rx="28" ry="10"/>
-    <line x1="4" y1="32" x2="60" y2="32"/>
-    <ellipse cx="32" cy="32" rx="14" ry="28"/>
-  </g>
+
+  <circle cx="32" cy="32" r="28" fill="url(#shine)"/>
+  <circle cx="32" cy="32" r="28" fill="none" stroke="#0a275e" stroke-width="1.5"/>
 </svg>
