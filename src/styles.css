@@ -305,6 +305,57 @@ dd {
   height: 100%;
 }
 
+.map-toolbox {
+  position: absolute;
+  top: 0.85rem;
+  right: 0.85rem;
+  z-index: 3;
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.4rem;
+  border: 1px solid rgba(23, 32, 51, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 26px rgba(25, 35, 55, 0.18);
+}
+
+.map-toolbox button {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  place-items: center;
+  padding: 0;
+  border-color: #c7d0de;
+  background: #ffffff;
+}
+
+.map-toolbox button:hover {
+  background: #eef4ff;
+  border-color: var(--primary);
+}
+
+.map-toolbox svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: var(--ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.map-toolbox svg circle,
+.map-toolbox svg path:first-child {
+  fill: none;
+}
+
+.map-toolbox button:first-child svg circle,
+.map-toolbox button:first-child svg path:nth-child(2) {
+  fill: var(--primary);
+  stroke: var(--primary);
+}
+
 .street-view-panel {
   position: absolute;
   top: 0;
@@ -390,6 +441,18 @@ dd {
 
   .preset-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .map-toolbox {
+    top: 0.55rem;
+    right: 0.55rem;
+    gap: 0.35rem;
+  }
+
+  .map-toolbox button {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
   }
 }
 

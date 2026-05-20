@@ -37,6 +37,7 @@ import {
 } from "./lib/spatialFilters";
 
 type Mode = "simple" | "preset";
+type MapDisplayType = "roadmap" | "satellite" | "hybrid" | "terrain";
 
 type StreetViewState =
   | { status: "idle" }
@@ -71,6 +72,7 @@ export default function App() {
 
 function ScoutApp({ apiKey }: { apiKey: string }) {
   const mapDivRef = useRef<HTMLDivElement | null>(null);
+  const mapRegionRef = useRef<HTMLElement | null>(null);
   const streetViewDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const mapsRef = useRef<typeof google | null>(null);
@@ -93,6 +95,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [showBuildings, setShowBuildings] = useState(false);
   const [showWater, setShowWater] = useState(true);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const [mapType, setMapType] = useState<MapDisplayType>("roadmap");
   const [boundsWarning, setBoundsWarning] = useState<string | null>(null);
   const [searchWarning, setSearchWarning] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -390,6 +393,49 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     );
   }, [runStreetViewLookup]);
 
+  const zoomMap = useCallback((delta: number) => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    map.setZoom((map.getZoom() ?? DEFAULT_ZOOM) + delta);
+  }, []);
+
+  const toggleMapType = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const currentType = normalizeMapTypeId(map.getMapTypeId());
+    const nextType =
+      currentType === "satellite" || currentType === "hybrid" ? "roadmap" : "satellite";
+    map.setMapTypeId(nextType);
+    setMapType(nextType);
+  }, []);
+
+  const resetMapCamera = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    map.setHeading(0);
+    map.setTilt(0);
+  }, []);
+
+  const enterMapFullscreen = useCallback(() => {
+    const region = mapRegionRef.current;
+    if (!region || document.fullscreenElement) {
+      return;
+    }
+
+    void region.requestFullscreen().catch(() => {
+      setError("Fullscreen is not available in this browser.");
+    });
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const listeners: google.maps.MapsEventListener[] = [];
@@ -405,9 +451,23 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         const map = new maps.maps.Map(mapDivRef.current, {
           center: DEFAULT_CENTER,
           zoom: DEFAULT_ZOOM,
+          mapTypeId: "roadmap",
+          zoomControl: true,
           mapTypeControl: true,
-          streetViewControl: false,
+          mapTypeControlOptions: {
+            position: maps.maps.ControlPosition.TOP_RIGHT,
+            style: maps.maps.MapTypeControlStyle.HORIZONTAL_BAR,
+          },
+          streetViewControl: true,
+          streetViewControlOptions: {
+            position: maps.maps.ControlPosition.RIGHT_BOTTOM,
+          },
           fullscreenControl: true,
+          fullscreenControlOptions: {
+            position: maps.maps.ControlPosition.RIGHT_TOP,
+          },
+          rotateControl: true,
+          scaleControl: true,
           clickableIcons: false,
         });
 
@@ -417,6 +477,9 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         listeners.push(
           map.data.addListener("click", (event: google.maps.Data.MouseEvent) => {
             dataFeatureClickRef.current(event.feature);
+          }),
+          map.addListener("maptypeid_changed", () => {
+            setMapType(normalizeMapTypeId(map.getMapTypeId()));
           }),
           map.addListener("idle", () => {
             const nextZoom = map.getZoom() ?? DEFAULT_ZOOM;
@@ -614,8 +677,17 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         </section>
       </aside>
 
-      <main className="map-region">
+      <main ref={mapRegionRef} className="map-region">
         <div ref={mapDivRef} className="map-canvas" aria-label="Google map" />
+        <MapToolbox
+          mapType={mapType}
+          onStreetView={openMapCenterStreetView}
+          onZoomIn={() => zoomMap(1)}
+          onZoomOut={() => zoomMap(-1)}
+          onToggleMapType={toggleMapType}
+          onResetCamera={resetMapCamera}
+          onFullscreen={enterMapFullscreen}
+        />
         {streetViewState.status === "open" ? (
           <section className="street-view-panel" aria-label="Google Street View inspection">
             <div className="street-view-header">
@@ -632,6 +704,107 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         ) : null}
       </main>
     </div>
+  );
+}
+
+function MapToolbox({
+  mapType,
+  onStreetView,
+  onZoomIn,
+  onZoomOut,
+  onToggleMapType,
+  onResetCamera,
+  onFullscreen,
+}: {
+  mapType: string;
+  onStreetView: () => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onToggleMapType: () => void;
+  onResetCamera: () => void;
+  onFullscreen: () => void;
+}) {
+  const nextMapType =
+    mapType === "satellite" || mapType === "hybrid" ? "road map" : "satellite";
+
+  return (
+    <nav className="map-toolbox" aria-label="Google Maps tools">
+      <button type="button" onClick={onStreetView} aria-label="Open Street View at map center">
+        <StreetViewIcon />
+      </button>
+      <button type="button" onClick={onZoomIn} aria-label="Zoom in">
+        <PlusIcon />
+      </button>
+      <button type="button" onClick={onZoomOut} aria-label="Zoom out">
+        <MinusIcon />
+      </button>
+      <button
+        type="button"
+        onClick={onToggleMapType}
+        aria-label={`Switch to ${nextMapType}`}
+      >
+        <LayersIcon />
+      </button>
+      <button type="button" onClick={onResetCamera} aria-label="Reset map tilt and heading">
+        <CompassIcon />
+      </button>
+      <button type="button" onClick={onFullscreen} aria-label="Open map fullscreen">
+        <FullscreenIcon />
+      </button>
+    </nav>
+  );
+}
+
+function StreetViewIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="5" r="2.3" />
+      <path d="M9.4 10.1h5.2l.9 8.5a1.5 1.5 0 0 1-1.5 1.7h-4a1.5 1.5 0 0 1-1.5-1.7z" />
+      <path d="M7 11.2c1.4-.9 3.1-1.4 5-1.4s3.6.5 5 1.4" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function MinusIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function LayersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m12 4 8 4-8 4-8-4z" />
+      <path d="m4 12 8 4 8-4" />
+      <path d="m4 16 8 4 8-4" />
+    </svg>
+  );
+}
+
+function CompassIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8" />
+      <path d="m14.6 7.6-1.8 5.2-5.2 1.8 1.8-5.2z" />
+    </svg>
+  );
+}
+
+function FullscreenIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 4H4v4M16 4h4v4M8 20H4v-4M16 20h4v-4" />
+    </svg>
   );
 }
 
@@ -736,6 +909,19 @@ function validateSearchGate(
   }
 
   return null;
+}
+
+function normalizeMapTypeId(mapTypeId: string | undefined): MapDisplayType {
+  if (
+    mapTypeId === "satellite" ||
+    mapTypeId === "hybrid" ||
+    mapTypeId === "terrain" ||
+    mapTypeId === "roadmap"
+  ) {
+    return mapTypeId;
+  }
+
+  return "roadmap";
 }
 
 function mapBoundsWarning(
