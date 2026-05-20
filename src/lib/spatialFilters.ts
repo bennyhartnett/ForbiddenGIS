@@ -94,6 +94,16 @@ const UNPAVED_SURFACES = new Set([
   "grass",
   "mud",
 ]);
+const DIRT_SURFACES = new Set(["dirt", "earth", "ground", "mud"]);
+const TRACK_PAVED_SURFACES = new Set([
+  "asphalt",
+  "paved",
+  "concrete",
+  "paving_stones",
+  "chipseal",
+  "metal",
+  "wood",
+]);
 const ROUGH_SURFACES = new Set(["dirt", "earth", "ground", "mud", "sand", "rock", "grass"]);
 const ROUGH_TRACKTYPES = new Set(["grade3", "grade4", "grade5"]);
 const ROUGH_SMOOTHNESS = new Set([
@@ -163,6 +173,34 @@ export function applyPresetSpatialFilters(
   };
 
   switch (preset.id) {
+    case "preset-dirt-roads":
+      for (const feature of features) {
+        const tags = getFeatureTags(feature);
+        if (!tags.highway || !isDirtRoad(tags)) continue;
+        addResult(
+          feature,
+          "off-road",
+          isClearlyPrivate(feature) ? "Dirt road, restricted/private tag" : "Dirt road",
+          undefined,
+          tagDetail(tags, ["highway", "surface", "tracktype", "smoothness", "access"]),
+        );
+      }
+      break;
+
+    case "preset-alleys":
+      for (const feature of features) {
+        const tags = getFeatureTags(feature);
+        if (!isAlley(tags)) continue;
+        addResult(
+          feature,
+          "road",
+          isClearlyPrivate(feature) ? "Alley, restricted/private tag" : "Alley",
+          undefined,
+          tagDetail(tags, ["highway", "service", "name", "access", "surface"]),
+        );
+      }
+      break;
+
     case "preset-01":
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
@@ -257,22 +295,23 @@ export function applyPresetSpatialFilters(
       }
       break;
 
-    case "preset-07":
+    case "preset-07": {
       addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      const farFromBuildings = farFromAnyPredicate(context.buildings, NO_BUILDINGS_DISTANCE_METERS);
       for (const deadEnd of deadEndCandidates(context)) {
         if (isClearlyPrivate(deadEnd)) continue;
-        const building = nearestFeatureDistance(deadEnd, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
-        if (building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+        applyClippedResult(deadEnd, farFromBuildings, (matched, lengthMeters, spans) => {
           addResult(
-            deadEnd,
+            matched,
             "road",
             "Cul-de-sac/dead end with no mapped buildings nearby",
-            finiteDistance(building.distanceMeters),
-            `Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(getFeatureTags(deadEnd), ["highway", "junction", "noexit", "access"])}`,
+            undefined,
+            `${describeClip(lengthMeters, spans)}. ${tagDetail(getFeatureTags(deadEnd), ["highway", "junction", "noexit", "access"])}`,
           );
-        }
+        });
       }
       break;
+    }
 
     case "preset-08":
       addContexts(contextFeatures, context.water, "context-water", "water", "Water context");
@@ -319,23 +358,24 @@ export function applyPresetSpatialFilters(
       }
       break;
 
-    case "preset-10":
+    case "preset-10": {
       addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      const farFromBuildings = farFromAnyPredicate(context.buildings, NO_BUILDINGS_DISTANCE_METERS);
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isStreetParkingLegalish(tags)) continue;
-        const building = nearestFeatureDistance(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
-        if (building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+        applyClippedResult(road, farFromBuildings, (matched, lengthMeters, spans) => {
           addResult(
-            road,
+            matched,
             "road",
             "Street-parking road with no mapped buildings nearby",
-            finiteDistance(building.distanceMeters),
-            `${parkingDetail(tags)} Nearest mapped building: ${formatMeters(building.distanceMeters)}.`,
+            undefined,
+            `${parkingDetail(tags)} ${describeClip(lengthMeters, spans)}.`,
           );
-        }
+        });
       }
       break;
+    }
 
     case "preset-11": {
       addContexts(contextFeatures, context.roads, "context-road", "road", "Road context");
@@ -363,26 +403,31 @@ export function applyPresetSpatialFilters(
       break;
     }
 
-    case "preset-12":
+    case "preset-12": {
       addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      const farFromBuildings = farFromAnyPredicate(context.buildings, NO_BUILDINGS_DISTANCE_METERS);
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isSpecificMph(tags, 25) || isClearlyPrivate(road)) continue;
-        const building = nearestFeatureDistance(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
-        if (building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+        applyClippedResult(road, farFromBuildings, (matched, lengthMeters, spans) => {
           addResult(
-            road,
+            matched,
             "road",
             "25 mph road with no mapped buildings nearby",
-            finiteDistance(building.distanceMeters),
-            `Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(tags, ["highway", "maxspeed", "access"])}`,
+            undefined,
+            `${describeClip(lengthMeters, spans)}. ${tagDetail(tags, ["highway", "maxspeed", "access"])}`,
           );
-        }
+        });
       }
       break;
+    }
 
-    case "preset-13":
+    case "preset-13": {
       addContexts(contextFeatures, context.trees, "context-woods", "woods", "Tree context");
+      const nearTrees = nearAnyPredicate(
+        [...context.trees, ...context.woods],
+        TREE_CONTEXT_DISTANCE_METERS,
+      );
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isSpecificMph(tags, 25) || isClearlyPrivate(road)) continue;
@@ -398,54 +443,57 @@ export function applyPresetSpatialFilters(
           continue;
         }
 
-        const runMeters = treeLinedRunMeters(road, context);
-        if (runMeters >= TREE_LINED_REQUIRED_METERS) {
+        applyClippedResult(road, nearTrees, (matched, lengthMeters, spans) => {
+          if (lengthMeters < TREE_LINED_REQUIRED_METERS) return;
           addResult(
-            road,
+            matched,
             "road",
             "25 mph tree-lined road",
             undefined,
-            `Tree-lined run: ${formatMeters(runMeters)} (>= ${formatMeters(TREE_LINED_REQUIRED_METERS)}). ${tagDetail(tags, ["highway", "maxspeed", "tree_lined", "access"])}`,
+            `Tree-lined run: ${describeClip(lengthMeters, spans)} (>= ${formatMeters(TREE_LINED_REQUIRED_METERS)}). ${tagDetail(tags, ["highway", "maxspeed", "tree_lined", "access"])}`,
           );
-        }
+        });
       }
       break;
+    }
 
-    case "preset-14":
+    case "preset-14": {
       addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      const farFromBuildings = farFromAnyPredicate(context.buildings, NO_BUILDINGS_DISTANCE_METERS);
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isLowSpeedRoad(tags) || !isShoulderedRoad(tags) || isClearlyPrivate(road)) continue;
-        const building = nearestFeatureDistance(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
-        if (building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+        applyClippedResult(road, farFromBuildings, (matched, lengthMeters, spans) => {
           addResult(
-            road,
+            matched,
             "road",
             "Low-speed shouldered road with no mapped buildings nearby",
-            finiteDistance(building.distanceMeters),
-            `Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(tags, ["maxspeed", "shoulder", "shoulder:left", "shoulder:right", "shoulder:both", "access"])}`,
+            undefined,
+            `${describeClip(lengthMeters, spans)}. ${tagDetail(tags, ["maxspeed", "shoulder", "shoulder:left", "shoulder:right", "shoulder:both", "access"])}`,
           );
-        }
+        });
       }
       break;
+    }
 
-    case "preset-15":
+    case "preset-15": {
       addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      const farFromBuildings = farFromAnyPredicate(context.buildings, NO_BUILDINGS_DISTANCE_METERS);
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isUnpavedRoad(tags) || isClearlyPrivate(road)) continue;
-        const building = nearestFeatureDistance(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
-        if (building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+        applyClippedResult(road, farFromBuildings, (matched, lengthMeters, spans) => {
           addResult(
-            road,
+            matched,
             "off-road",
             "Unpaved public-ish road with no mapped buildings nearby",
-            finiteDistance(building.distanceMeters),
-            `Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(tags, ["surface", "tracktype", "access", "highway"])}`,
+            undefined,
+            `${describeClip(lengthMeters, spans)}. ${tagDetail(tags, ["surface", "tracktype", "access", "highway"])}`,
           );
-        }
+        });
       }
       break;
+    }
 
     case "preset-16":
       for (const road of context.roads) {
@@ -478,24 +526,27 @@ export function applyPresetSpatialFilters(
       }
       break;
 
-    case "preset-18":
+    case "preset-18": {
       addContexts(contextFeatures, context.woods, "context-woods", "woods", "Woods/forest context");
       addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      const predicate = andPredicates(
+        nearAnyPredicate(context.woods, NEAR_WOODS_DISTANCE_METERS),
+        farFromAnyPredicate(context.buildings, NO_BUILDINGS_DISTANCE_METERS),
+      );
       for (const deadEnd of deadEndCandidates(context)) {
         if (isClearlyPrivate(deadEnd)) continue;
-        const woods = nearestFeatureDistance(deadEnd, context.woods, NEAR_WOODS_DISTANCE_METERS);
-        const building = nearestFeatureDistance(deadEnd, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
-        if (woods.distanceMeters <= NEAR_WOODS_DISTANCE_METERS && building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+        applyClippedResult(deadEnd, predicate, (matched, lengthMeters, spans) => {
           addResult(
-            deadEnd,
+            matched,
             "road",
             "Dead end near woods with no mapped buildings nearby",
-            woods.distanceMeters,
-            `Nearest woods/forest: ${formatMeters(woods.distanceMeters)}. Nearest mapped building: ${formatMeters(building.distanceMeters)}.`,
+            undefined,
+            `${describeClip(lengthMeters, spans)} near woods and away from buildings. ${tagDetail(getFeatureTags(deadEnd), ["highway", "junction", "noexit", "access"])}`,
           );
-        }
+        });
       }
       break;
+    }
 
     case "preset-19": {
       const woodsCoverMeters = 25;
@@ -535,41 +586,46 @@ export function applyPresetSpatialFilters(
       }
       break;
 
-    case "preset-21":
+    case "preset-21": {
       addContexts(contextFeatures, context.water, "context-water", "water", "Water context");
+      const nearWater = nearAnyPredicate(context.water, WATER_ADJACENT_DISTANCE_METERS);
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isStreetParkingLegalish(tags)) continue;
-        const water = nearestFeatureDistance(road, context.water, WATER_ADJACENT_DISTANCE_METERS);
-        if (water.distanceMeters <= WATER_ADJACENT_DISTANCE_METERS) {
+        applyClippedResult(road, nearWater, (matched, lengthMeters, spans) => {
           addResult(
-            road,
+            matched,
             "road",
             "Street-parking road near water",
-            water.distanceMeters,
-            `${parkingDetail(tags)} Nearest mapped water: ${formatMeters(water.distanceMeters)}.`,
+            undefined,
+            `${parkingDetail(tags)} ${describeClip(lengthMeters, spans)} within ${formatMeters(WATER_ADJACENT_DISTANCE_METERS)} of water.`,
           );
-        }
+        });
       }
       break;
+    }
 
-    case "preset-22":
+    case "preset-22": {
       addContexts(contextFeatures, [...context.parks, ...context.woods], "context-park", "park", "Park/woods context");
+      const nearParkOrWoods = nearAnyPredicate(
+        [...context.parks, ...context.woods],
+        NEAR_PARK_DISTANCE_METERS,
+      );
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isStreetParkingLegalish(tags)) continue;
-        const park = nearestFeatureDistance(road, [...context.parks, ...context.woods], NEAR_PARK_DISTANCE_METERS);
-        if (park.distanceMeters <= NEAR_PARK_DISTANCE_METERS) {
+        applyClippedResult(road, nearParkOrWoods, (matched, lengthMeters, spans) => {
           addResult(
-            road,
+            matched,
             "road",
             "Street-parking road near park or woods",
-            park.distanceMeters,
-            `${parkingDetail(tags)} Nearest park/woods: ${formatMeters(park.distanceMeters)}.`,
+            undefined,
+            `${parkingDetail(tags)} ${describeClip(lengthMeters, spans)} within ${formatMeters(NEAR_PARK_DISTANCE_METERS)} of park/woods.`,
           );
-        }
+        });
       }
       break;
+    }
 
     case "preset-23":
       addContexts(contextFeatures, [...context.parking, ...context.pullOffs], "context-pull-off", "pull-off", "Pull-off/parking context");
@@ -668,41 +724,43 @@ export function applyPresetSpatialFilters(
       }
       break;
 
-    case "preset-29":
+    case "preset-29": {
       addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      const farFromBuildings = farFromAnyPredicate(context.buildings, NO_BUILDINGS_DISTANCE_METERS);
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isUnlitRoad(tags) || isClearlyPrivate(road)) continue;
-        const building = nearestFeatureDistance(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
-        if (building.distanceMeters > NO_BUILDINGS_DISTANCE_METERS) {
+        applyClippedResult(road, farFromBuildings, (matched, lengthMeters, spans) => {
           addResult(
-            road,
+            matched,
             "road",
             "Unlit secluded road",
-            finiteDistance(building.distanceMeters),
-            `Lit tag: ${tags.lit ?? "n/a"}. Nearest mapped building: ${formatMeters(building.distanceMeters)}.`,
+            undefined,
+            `Lit tag: ${tags.lit ?? "n/a"}. ${describeClip(lengthMeters, spans)}.`,
           );
-        }
+        });
       }
       break;
+    }
 
-    case "preset-30":
+    case "preset-30": {
       addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      const farFromBuildings = farFromAnyPredicate(context.buildings, NO_BUILDINGS_DISTANCE_METERS);
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isLikelyQuietRoad(tags) || !isNoSidewalkRoad(tags) || isClearlyPrivate(road)) continue;
-        const buildingCount = countFeaturesWithin(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
-        if (buildingCount <= 1) {
+        applyClippedResult(road, farFromBuildings, (matched, lengthMeters, spans) => {
           addResult(
-            road,
+            matched,
             "road",
             "No-sidewalk quiet road",
             undefined,
-            `Mapped buildings within 100 feet: ${buildingCount}. ${tagDetail(tags, ["sidewalk", "sidewalk:left", "sidewalk:right", "maxspeed", "highway"])}`,
+            `${describeClip(lengthMeters, spans)}. ${tagDetail(tags, ["sidewalk", "sidewalk:left", "sidewalk:right", "maxspeed", "highway"])}`,
           );
-        }
+        });
       }
       break;
+    }
 
     case "preset-31":
       addContexts(contextFeatures, context.roads, "context-road", "road", "Road context");
@@ -755,38 +813,45 @@ export function applyPresetSpatialFilters(
       }
       break;
 
-    case "preset-34":
+    case "preset-34": {
       addContexts(contextFeatures, context.trees, "context-woods", "woods", "Tree context");
       addContexts(contextFeatures, context.buildings, "context-building", "building", "Building context");
+      const farFromBuildings = farFromAnyPredicate(context.buildings, NO_BUILDINGS_DISTANCE_METERS);
+      const nearTrees = nearAnyPredicate(
+        [...context.trees, ...context.woods],
+        TREE_CONTEXT_DISTANCE_METERS,
+      );
+      const treeLinedAndAway = andPredicates(nearTrees, farFromBuildings);
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isLowSpeedRoad(tags) || isClearlyPrivate(road)) continue;
-        const building = nearestFeatureDistance(road, context.buildings, NO_BUILDINGS_DISTANCE_METERS);
-        if (building.distanceMeters <= NO_BUILDINGS_DISTANCE_METERS) continue;
 
         if (tags.tree_lined && tags.tree_lined !== "no") {
-          addResult(
-            road,
-            "road",
-            "Low-speed tree-lined road with no mapped buildings nearby",
-            finiteDistance(building.distanceMeters),
-            `Direct tree_lined=${tags.tree_lined}. Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(tags, ["maxspeed", "tree_lined", "highway", "access"])}`,
-          );
+          applyClippedResult(road, farFromBuildings, (matched, lengthMeters, spans) => {
+            addResult(
+              matched,
+              "road",
+              "Low-speed tree-lined road with no mapped buildings nearby",
+              undefined,
+              `Direct tree_lined=${tags.tree_lined}. ${describeClip(lengthMeters, spans)}. ${tagDetail(tags, ["maxspeed", "tree_lined", "highway", "access"])}`,
+            );
+          });
           continue;
         }
 
-        const runMeters = treeLinedRunMeters(road, context);
-        if (runMeters >= TREE_LINED_REQUIRED_METERS) {
+        applyClippedResult(road, treeLinedAndAway, (matched, lengthMeters, spans) => {
+          if (lengthMeters < TREE_LINED_REQUIRED_METERS) return;
           addResult(
-            road,
+            matched,
             "road",
             "Low-speed tree-lined road with no mapped buildings nearby",
-            finiteDistance(building.distanceMeters),
-            `Tree-lined run: ${formatMeters(runMeters)} (>= ${formatMeters(TREE_LINED_REQUIRED_METERS)}). Nearest mapped building: ${formatMeters(building.distanceMeters)}. ${tagDetail(tags, ["maxspeed", "tree_lined", "highway", "access"])}`,
+            undefined,
+            `Tree-lined run: ${describeClip(lengthMeters, spans)} (>= ${formatMeters(TREE_LINED_REQUIRED_METERS)}). ${tagDetail(tags, ["maxspeed", "tree_lined", "highway", "access"])}`,
           );
-        }
+        });
       }
       break;
+    }
   }
 
   if (options.includeWater) {
@@ -829,6 +894,22 @@ export function isShoulderedRoad(tags: Record<string, string>): boolean {
     const value = tags[key]?.toLowerCase();
     return Boolean(value) && !["no", "none", "false", "0"].includes(value);
   });
+}
+
+export function isDirtRoad(tags: Record<string, string>): boolean {
+  const surface = tags.surface?.toLowerCase();
+  if (surface !== undefined && DIRT_SURFACES.has(surface)) return true;
+  if (tags.highway === "track") {
+    return surface === undefined || !TRACK_PAVED_SURFACES.has(surface);
+  }
+  return false;
+}
+
+export function isAlley(tags: Record<string, string>): boolean {
+  return (
+    (tags.highway === "service" && tags.service === "alley") ||
+    tags.highway === "alley"
+  );
 }
 
 export function isUnpavedRoad(tags: Record<string, string>): boolean {
@@ -1265,20 +1346,6 @@ function differentFeature(a?: GeoJSONFeature, b?: GeoJSONFeature): boolean {
   return aId === undefined || bId === undefined ? a !== b : aId !== bId;
 }
 
-function countFeaturesWithin(
-  feature: GeoJSONFeature,
-  contextFeatures: GeoJSONFeature[],
-  maxMeters: number,
-): number {
-  let count = 0;
-  for (const candidate of contextFeatures) {
-    if (distanceBetweenFeaturesMeters(feature, candidate) <= maxMeters) {
-      count += 1;
-    }
-  }
-  return count;
-}
-
 function distanceBetweenFeaturesMeters(a: GeoJSONFeature, b: GeoJSONFeature): number {
   let best = Number.POSITIVE_INFINITY;
   for (const coordinate of sampleFeatureCoordinates(a, 8)) {
@@ -1421,31 +1488,6 @@ function flattenPositions(geometry: Geometry): Position[] {
   }
 }
 
-function treeLinedRunMeters(road: GeoJSONFeature, context: SpatialContext): number {
-  const stepMeters = 5;
-  const lateralBuffer = TREE_CONTEXT_DISTANCE_METERS;
-  const lines = extractLineStrings(road.geometry);
-  if (lines.length === 0) return 0;
-
-  const treeFeatures = [...context.trees, ...context.woods];
-  if (treeFeatures.length === 0) return 0;
-
-  let longestRun = 0;
-  for (const line of lines) {
-    let currentRun = 0;
-    for (const sample of sampleLineAtInterval(line, stepMeters)) {
-      const nearest = nearestDistanceToFeatures(sample, treeFeatures, lateralBuffer);
-      if (nearest.distanceMeters <= lateralBuffer) {
-        currentRun += stepMeters;
-        if (currentRun > longestRun) longestRun = currentRun;
-      } else {
-        currentRun = 0;
-      }
-    }
-  }
-  return longestRun;
-}
-
 function extractLineStrings(geometry: Geometry): Position[][] {
   if (geometry.type === "LineString") return [geometry.coordinates];
   if (geometry.type === "MultiLineString") return geometry.coordinates;
@@ -1505,6 +1547,54 @@ export interface ClippedRoad {
   lengthMeters: number;
 }
 
+function farFromAnyPredicate(
+  features: GeoJSONFeature[],
+  minMeters: number,
+): (sample: LatLng) => boolean {
+  if (features.length === 0) return () => true;
+  return (sample) =>
+    nearestDistanceToFeatures(sample, features, minMeters).distanceMeters > minMeters;
+}
+
+function applyClippedResult(
+  feature: GeoJSONFeature,
+  predicate: (sample: LatLng) => boolean,
+  onMatch: (matched: GeoJSONFeature, lengthMeters: number, spans: number) => void,
+): void {
+  const geometry = feature.geometry;
+  if (geometry.type === "LineString" || geometry.type === "MultiLineString") {
+    const clipped = clipRoadToPredicate(feature, predicate);
+    if (clipped) {
+      onMatch(clipped.feature, clipped.lengthMeters, clipped.spans);
+    }
+    return;
+  }
+  const coord = representativeCoordinate(feature);
+  if (predicate(coord)) {
+    onMatch(feature, 0, 1);
+  }
+}
+
+function nearAnyPredicate(
+  features: GeoJSONFeature[],
+  maxMeters: number,
+): (sample: LatLng) => boolean {
+  if (features.length === 0) return () => false;
+  return (sample) =>
+    nearestDistanceToFeatures(sample, features, maxMeters).distanceMeters <= maxMeters;
+}
+
+function andPredicates(
+  ...predicates: Array<(sample: LatLng) => boolean>
+): (sample: LatLng) => boolean {
+  return (sample) => predicates.every((predicate) => predicate(sample));
+}
+
+function describeClip(lengthMeters: number, spans: number): string {
+  if (lengthMeters <= 0) return "Matched at single point";
+  return `Matching run: ${formatMeters(lengthMeters)} across ${spans} span(s)`;
+}
+
 export function clipRoadToPredicate(
   road: GeoJSONFeature,
   predicate: (sample: LatLng) => boolean,
@@ -1552,44 +1642,6 @@ function lineLengthMeters(positions: Position[]): number {
     total += distance(positions[i], positions[i + 1], { units: "kilometers" }) * 1000;
   }
   return total;
-}
-
-function treeEvidence(
-  road: GeoJSONFeature,
-  context: SpatialContext,
-): { matched: boolean; distanceMeters: number; detail: string } {
-  const tags = getFeatureTags(road);
-  if (tags.tree_lined && tags.tree_lined !== "no") {
-    return {
-      matched: true,
-      distanceMeters: 0,
-      detail: `Direct tree_lined=${tags.tree_lined}; estimated tree-lined length at least ${formatMeters(TREE_LINED_REQUIRED_METERS)}.`,
-    };
-  }
-
-  const tree = nearestFeatureDistance(road, context.trees, TREE_CONTEXT_DISTANCE_METERS);
-  if (tree.distanceMeters <= TREE_CONTEXT_DISTANCE_METERS) {
-    return {
-      matched: true,
-      distanceMeters: tree.distanceMeters,
-      detail: `Nearby tree/tree_row evidence within ${formatMeters(tree.distanceMeters)}; approximate tree-lined length is heuristic.`,
-    };
-  }
-
-  const woods = nearestFeatureDistance(road, context.woods, TREE_CONTEXT_DISTANCE_METERS);
-  if (woods.distanceMeters <= TREE_CONTEXT_DISTANCE_METERS) {
-    return {
-      matched: true,
-      distanceMeters: woods.distanceMeters,
-      detail: `Nearby woods/forest evidence within ${formatMeters(woods.distanceMeters)}; approximate tree-lined length is heuristic.`,
-    };
-  }
-
-  return {
-    matched: false,
-    distanceMeters: Number.POSITIVE_INFINITY,
-    detail: "No tree-lined evidence found.",
-  };
 }
 
 function finiteDistance(distanceMeters: number): number | undefined {

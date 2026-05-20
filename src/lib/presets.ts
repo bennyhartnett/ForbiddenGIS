@@ -8,6 +8,8 @@ export interface PresetQueryOptions {
 }
 
 export const PRESETS: PresetDefinition[] = [
+  preset("preset-dirt-roads", "Dirt roads", "Roads with explicit dirt, earth, ground, or mud surfaces.", 14, false, false, false),
+  preset("preset-alleys", "Alleys", "Service alleys (highway=service, service=alley) and explicit alley ways.", 14, false, false, false),
   preset("preset-01", "Off-Roading Legal", "Public-ish tracks and rough roads without private/no access tags.", 14, true, true, false),
   preset("preset-02", "Off-Roading Private", "Tracks, rough roads, and service ways that are tagged restricted or private.", 14, true, true, false),
   preset("preset-03", "Golf Cart Permitted Public and Private", "Roads, paths, and tracks with golf cart or low-speed vehicle tags.", 14, true, true, false),
@@ -100,6 +102,10 @@ function presetClauses(
   boxes: { bbox: string; bbox100ft: string; bbox60m: string; bbox100m: string },
 ): string[] {
   switch (presetId) {
+    case "preset-dirt-roads":
+      return dirtRoadClauses(boxes.bbox);
+    case "preset-alleys":
+      return alleyClauses(boxes.bbox);
     case "preset-01":
       return [...roughRoadClauses(boxes.bbox), ...unpavedRoadClauses(boxes.bbox), ...buildingClauses(boxes.bbox100ft)];
     case "preset-02":
@@ -184,6 +190,20 @@ function presetClauses(
 
 function roadClauses(bbox: string): string[] {
   return [`way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service|living_street|track)$"](${bbox});`];
+}
+
+function dirtRoadClauses(bbox: string): string[] {
+  return [
+    `way["highway"~"^(unclassified|residential|service|living_street|tertiary|secondary|primary|track)$"]["surface"~"^(dirt|earth|ground|mud)$"](${bbox});`,
+    `way["highway"="track"]["surface"!~"^(asphalt|paved|concrete|paving_stones|chipseal|metal|wood)$"](${bbox});`,
+  ];
+}
+
+function alleyClauses(bbox: string): string[] {
+  return [
+    `way["highway"="service"]["service"="alley"](${bbox});`,
+    `way["highway"="alley"](${bbox});`,
+  ];
 }
 
 function publicRoadClauses(bbox: string): string[] {

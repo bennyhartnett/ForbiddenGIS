@@ -94,6 +94,8 @@ export interface SelectedFeature {
 }
 
 export type PresetId =
+  | "preset-dirt-roads"
+  | "preset-alleys"
   | "preset-01"
   | "preset-02"
   | "preset-03"

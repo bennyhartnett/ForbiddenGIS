@@ -77,9 +77,10 @@ const PRESET_CATEGORIES: PresetCategory[] = [
     id: "off-road",
     label: "Off-road",
     match: (preset) =>
-      /off-road|rough|unpaved|high-clearance/i.test(preset.name) ||
+      /off-road|rough|unpaved|high-clearance|dirt/i.test(preset.name) ||
       preset.id === "preset-15" ||
-      preset.id === "preset-16",
+      preset.id === "preset-16" ||
+      preset.id === "preset-dirt-roads",
   },
   {
     id: "parking",
@@ -174,7 +175,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [mode, setMode] = useState<Mode>("preset");
   const [tagFilter, setTagFilter] = useState("amenity=restaurant");
   const [rawQuery, setRawQuery] = useState(DEFAULT_RAW_QUERY);
-  const [presetId, setPresetId] = useState<PresetId>("preset-01");
+  const [presetId, setPresetId] = useState<PresetId>("preset-dirt-roads");
   const [presetSearch, setPresetSearch] = useState("");
   const [presetCategory, setPresetCategory] = useState<string>("all");
   const [showBuildings, setShowBuildings] = useState(false);
@@ -1805,9 +1806,16 @@ function RefreshIcon() {
 function PresetGlyph({ presetId }: { presetId: PresetId }) {
   switch (true) {
     case /^preset-(01|02|15|16)$/.test(presetId):
+    case presetId === "preset-dirt-roads":
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M4 18c2-4 6-4 8 0s6 4 8 0" />
+        </svg>
+      );
+    case presetId === "preset-alleys":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 4v16M18 4v16M6 12h12" />
         </svg>
       );
     case /^preset-(05|08|17|24|21)$/.test(presetId):
