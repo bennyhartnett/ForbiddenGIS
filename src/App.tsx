@@ -221,7 +221,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [boundsWarning, setBoundsWarning] = useState<string | null>(null);
   const [searchWarning, setSearchWarning] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [mapStatus, setMapStatus] = useState("Loading Google Maps...");
+  const [mapStatus, setMapStatus] = useState("Loading map...");
   const [error, setError] = useState<string | null>(null);
   const [resultCount, setResultCount] = useState(0);
   const [rawFeatureCount, setRawFeatureCount] = useState<number | null>(null);
@@ -335,7 +335,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         .catch(() => {
           if (!cancelled) {
             setPlaceSuggestions([]);
-            setSuggestionsStatus("Place suggestions unavailable; location search still works.");
+            setSuggestionsStatus("Suggestions unavailable. Type the full place and press search.");
           }
         });
     }, 250);
@@ -432,7 +432,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         setStreetViewState({
           status: "error",
           sourceName,
-          message: "Google Street View is not ready yet.",
+          message: "Street view isn't ready yet.",
         });
         return;
       }
@@ -446,7 +446,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           setStreetViewState({
             status: "none",
             sourceName,
-            message: "No Street View found nearby.",
+            message: "No street view available nearby.",
           });
           return;
         }
@@ -457,7 +457,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           status: "error",
           sourceName,
           message:
-            lookupError instanceof Error ? lookupError.message : "Street View lookup failed.",
+            lookupError instanceof Error ? lookupError.message : "Couldn't load street view.",
         });
       }
     },
@@ -553,7 +553,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         requestLabel = selectedPreset.name;
       } else {
         query = prepareRawOverpassQuery(rawQuery, bbox);
-        requestLabel = "Raw Overpass QL";
+        requestLabel = "Custom query";
       }
     } catch (parseError) {
       setError(parseError instanceof Error ? parseError.message : "Invalid search input.");
@@ -632,7 +632,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
                 includeBuildings: false,
                 includeWater: false,
                 renderLimit: RENDER_LIMIT,
-                simpleMatchLabel: "Matched raw Overpass QL",
+                simpleMatchLabel: "Matched custom query",
               });
 
       renderFeatures({ type: "FeatureCollection", features: result.features });
@@ -815,7 +815,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           })
           .catch(() => {
             if (!cancelled) {
-              setSuggestionsStatus("Place suggestions unavailable; location search still works.");
+              setSuggestionsStatus("Suggestions unavailable. Type the full place and press search.");
             }
           });
 
@@ -863,8 +863,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         window.setTimeout(syncCurrentMapState, 1500);
         setMapStatus("Map ready");
       } catch (mapError) {
-        setMapStatus("Google Maps failed to load.");
-        setError(mapError instanceof Error ? mapError.message : "Google Maps failed to load.");
+        setMapStatus("Map failed to load.");
+        setError(mapError instanceof Error ? mapError.message : "Map failed to load.");
       }
     }
 
@@ -898,7 +898,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   return (
     <div className="app-shell">
       <main ref={mapRegionRef} className="map-region" aria-label="Map workspace">
-        <div ref={mapDivRef} className="map-canvas" aria-label="Google map" />
+        <div ref={mapDivRef} className="map-canvas" aria-label="Map" />
 
         <SearchPill
           locationQuery={locationQuery}
@@ -1042,10 +1042,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         ) : null}
 
         {streetViewState.status === "open" ? (
-          <section className="street-view-panel" aria-label="Google Street View inspection">
+          <section className="street-view-panel" aria-label="Street view">
             <div className="street-view-header">
               <div>
-                <p className="eyebrow">Street View</p>
+                <p className="eyebrow">Street view</p>
                 <h2>{streetViewState.sourceName}</h2>
               </div>
               <button type="button" className="ghost-button" onClick={closeStreetView}>
@@ -1102,7 +1102,7 @@ function SearchPill({
         <input
           value={locationQuery}
           onChange={(event) => onLocationChange(event.target.value)}
-          placeholder="Search Google Maps"
+          placeholder="Search a place or address"
           autoComplete="off"
           spellCheck={false}
           aria-label="Location"
@@ -1350,7 +1350,7 @@ function PresetPanel(props: {
                 aria-pressed={props.mode === "raw"}
                 onClick={() => props.onModeChange("raw")}
               >
-                Raw QL
+                Custom
               </button>
               <button
                 type="button"
@@ -1389,7 +1389,7 @@ function PresetPanel(props: {
 
             {props.mode === "raw" ? (
               <div className="tuner-row">
-                <label htmlFor="raw-query">Overpass QL</label>
+                <label htmlFor="raw-query">Custom query</label>
                 <textarea
                   id="raw-query"
                   className="raw-query-input"
@@ -1440,14 +1440,8 @@ function PresetPanel(props: {
             <dd>{props.resultCount.toLocaleString()}</dd>
           </div>
           <div>
-            <dt>Rendered</dt>
+            <dt>Shown</dt>
             <dd>{props.renderedFeatureCount.toLocaleString()}</dd>
-          </div>
-          <div>
-            <dt>Raw OSM</dt>
-            <dd>
-              {props.rawFeatureCount === null ? "—" : props.rawFeatureCount.toLocaleString()}
-            </dd>
           </div>
         </dl>
       </div>
@@ -1473,7 +1467,7 @@ function SearchStatusBanner(props: {
           <SpinnerIcon />
         </span>
         <span className="search-status-text">
-          <strong>Searching the Overpass API…</strong>
+          <strong>Searching…</strong>
           <small>Elapsed {formatSeconds(props.elapsedMs)}</small>
         </span>
       </div>
@@ -1759,7 +1753,7 @@ function MapControls(props: {
   return (
     <nav className="map-controls" aria-label="Map controls">
       <div className="icon-stack">
-        <button type="button" onClick={props.onStreetView} aria-label="Open Street View at map center" title="Street View">
+        <button type="button" onClick={props.onStreetView} aria-label="Open street view at map center" title="Street view">
           <PegmanIcon />
         </button>
       </div>
@@ -1911,12 +1905,9 @@ function FeatureCard({
     <section className="feature-card" aria-label="Selected feature">
       <div className="feature-card-header">
         <div>
-          <p className="eyebrow">Selected feature</p>
+          <p className="eyebrow">Selected location</p>
           <h2>{selectedFeature.name}</h2>
-          <small>
-            {selectedFeature.osmType ?? "feature"} {selectedFeature.osmId ?? ""} ·{" "}
-            {formatCoordinate(selectedFeature.coordinate)}
-          </small>
+          <small>{formatCoordinate(selectedFeature.coordinate)}</small>
         </div>
         <button type="button" className="panel-toggle" onClick={onClose} aria-label="Close">
           <CloseIcon />
@@ -1971,13 +1962,13 @@ function FeatureCard({
 
 function StreetViewStatus({ state }: { state: StreetViewState }) {
   if (state.status === "searching") {
-    return <p className="notice">Looking for nearby Street View...</p>;
+    return <p className="notice">Looking for a nearby street view…</p>;
   }
   if (state.status === "none" || state.status === "error") {
     return <p className="notice warning">{state.message}</p>;
   }
   if (state.status === "open") {
-    return <p className="notice success">Street View found.</p>;
+    return <p className="notice success">Street view ready.</p>;
   }
   return null;
 }
@@ -2298,15 +2289,16 @@ function MissingApiKey() {
     <main className="setup-screen">
       <section className="setup-panel">
         <p className="eyebrow">Setup required</p>
-        <h1>Overpass Scout View</h1>
+        <h1>ForbiddenGIS</h1>
         <p>
-          Add a Google Maps JavaScript API key as <code>VITE_GOOGLE_MAPS_API_KEY</code> before
-          running or building the app.
+          A map provider key hasn't been configured. Set{" "}
+          <code>VITE_GOOGLE_MAPS_API_KEY</code> in <code>.env.local</code> before running or
+          building.
         </p>
-        <pre>VITE_GOOGLE_MAPS_API_KEY=your_key_here</pre>
+        <pre>VITE_GOOGLE_MAPS_API_KEY=your_key</pre>
         <p>
-          This key is embedded in the client bundle. Restrict it by HTTP referrer in Google Cloud
-          before publishing to GitHub Pages.
+          The key is embedded in the client bundle. Restrict it by HTTP referrer in the provider
+          console before deploying anywhere public.
         </p>
       </section>
     </main>
@@ -2412,7 +2404,7 @@ function validateSearchGate(
     return null;
   }
   if (mode === "raw") {
-    if (zoom < 13) return "Zoom in to at least 13 before running a raw Overpass query.";
+    if (zoom < 13) return "Zoom in to at least 13 before running a custom query.";
     return null;
   }
   if (zoom < presetMinZoom) {
@@ -2492,8 +2484,8 @@ function computeDifficultyEstimate(
       level,
       label: labelForDifficulty(level),
       detail: hasBboxMacro
-        ? "Raw QL with {{bbox}} scoped to current map."
-        : "No {{bbox}} macro — query may ignore current view.",
+        ? "Custom query scoped to the current map area."
+        : "Custom query may ignore the current map area.",
       scope,
     };
   }
@@ -2512,9 +2504,9 @@ function computeDifficultyEstimate(
 
 function prepareRawOverpassQuery(rawQuery: string, bbox: BBox): string {
   const trimmed = rawQuery.trim();
-  if (!trimmed) throw new Error("Paste an Overpass QL query before searching.");
+  if (!trimmed) throw new Error("Enter a query before searching.");
   if (!trimmed.includes("[out:json")) {
-    throw new Error("Raw queries must request JSON output, for example [out:json][timeout:25];");
+    throw new Error("Custom queries must request JSON output, e.g. [out:json][timeout:25];");
   }
   const bboxText = [
     bbox.south.toFixed(7),

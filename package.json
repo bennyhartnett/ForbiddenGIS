@@ -1,9 +1,9 @@
 {
-  "name": "overpass-scout-view",
+  "name": "forbiddengis",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "A static React app for scouting OpenStreetMap Overpass results on Google Maps and Street View.",
+  "description": "ForbiddenGIS — scout locations on the map and inspect them up close.",
   "engines": {
     "node": ">=22.12.0"
   },

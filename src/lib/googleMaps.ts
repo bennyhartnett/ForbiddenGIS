@@ -22,7 +22,7 @@ export function loadGoogleMaps(apiKey: string): Promise<typeof google> {
 
     if (existing) {
       existing.addEventListener("load", () => resolve(window.google));
-      existing.addEventListener("error", () => reject(new Error("Google Maps failed to load.")));
+      existing.addEventListener("error", () => reject(new Error("Map failed to load.")));
       return;
     }
 
@@ -34,7 +34,7 @@ export function loadGoogleMaps(apiKey: string): Promise<typeof google> {
     script.defer = true;
     script.dataset.googleMapsLoader = "true";
     script.addEventListener("load", () => resolve(window.google));
-    script.addEventListener("error", () => reject(new Error("Google Maps failed to load.")));
+    script.addEventListener("error", () => reject(new Error("Map failed to load.")));
     document.head.append(script);
   });
 
@@ -88,7 +88,7 @@ function panoramaAtRadius(
           return;
         }
 
-        reject(new Error(`Street View lookup failed: ${status}`));
+        reject(new Error("Couldn't load street view."));
       },
     );
   });

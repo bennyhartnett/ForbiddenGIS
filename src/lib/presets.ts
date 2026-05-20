@@ -8,8 +8,8 @@ export interface PresetQueryOptions {
 }
 
 export const PRESETS: PresetDefinition[] = [
-  preset("preset-dirt-roads", "Dirt / gravel / unpaved roads", "Roads and tracks with unpaved surfaces (gravel, dirt, sand, grass, etc.) or any tracktype grade.", 14, false, false, false),
-  preset("preset-alleys", "Alleys", "Service alleys (highway=service, service=alley) and explicit alley ways.", 14, false, false, false),
+  preset("preset-dirt-roads", "Dirt / gravel / unpaved roads", "Roads and tracks with unpaved surfaces — gravel, dirt, sand, grass, or graded tracks.", 14, false, false, false),
+  preset("preset-alleys", "Alleys", "Service alleys and back-lot routes between buildings.", 14, false, false, false),
   preset("preset-01", "Off-Roading Legal", "Public-ish tracks and rough roads without private/no access tags.", 14, true, true, false),
   preset("preset-02", "Off-Roading Private", "Tracks, rough roads, and service ways that are tagged restricted or private.", 14, true, true, false),
   preset("preset-03", "Golf Cart Permitted Public and Private", "Roads, paths, and tracks with golf cart or low-speed vehicle tags.", 14, true, true, false),
@@ -18,7 +18,7 @@ export const PRESETS: PresetDefinition[] = [
   preset("preset-06", "Bridges", "Bridge-tagged features and mapped bridge structures.", 14, true, false, true),
   preset("preset-07", "Cul de sacs and dead ends with no buildings within 100 feet", "Explicit or inferred dead-end roads away from mapped buildings.", 15, true, true, false),
   preset("preset-08", "Water accessible by road", "Public-ish roads, parking, and water features that appear close together.", 14, true, false, true),
-  preset("preset-09", "roads you can park on", "Roads with explicit OSM street-parking tags.", 14, true, false, false),
+  preset("preset-09", "roads you can park on", "Roads with explicit street-parking tags.", 14, true, false, false),
   preset("preset-10", "roads you can park on with no buildings within 100 feet", "Street-parking roads away from mapped buildings.", 14, true, true, false),
   preset("preset-11", "Road-to-road dead ends connected by walking trail", "Walking trails that appear to connect dead ends or road endpoints.", 15, true, true, false),
   preset("preset-12", "25 mile an hour roads with no buildings for 100 feet", "25 mph roads away from mapped buildings.", 14, true, true, false),

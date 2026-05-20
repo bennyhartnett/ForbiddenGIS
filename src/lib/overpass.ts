@@ -68,7 +68,7 @@ export function parseTagFilter(input: string): ParsedTagFilter {
   }
 
   if (value !== "*" && DISALLOWED_VALUE_PATTERN.test(value)) {
-    throw new Error("Raw Overpass QL is not allowed here. Use only key=value or key=*.");
+    throw new Error("Custom query syntax isn't allowed here. Use key=value or key=*.");
   }
 
   if (value === "*") {
@@ -127,12 +127,11 @@ export async function runOverpassQuery(
       });
 
       if (!response.ok) {
-        const body = await response.text().catch(() => "");
         if (RETRYABLE_STATUSES.has(response.status) && attempt < OVERPASS_ENDPOINTS.length - 1) {
-          lastError = new Error(friendlyOverpassError(response.status, body));
+          lastError = new Error(friendlySearchError(response.status));
           continue;
         }
-        throw new Error(friendlyOverpassError(response.status, body));
+        throw new Error(friendlySearchError(response.status));
       }
 
       const data = (await response.json()) as OverpassResponse;
@@ -150,38 +149,23 @@ export async function runOverpassQuery(
     }
   }
 
-  throw lastError ?? new Error("Overpass request failed.");
+  throw lastError ?? new Error("Search failed. Try again in a moment.");
 }
 
-function friendlyOverpassError(status: number, body: string): string {
+function friendlySearchError(status: number): string {
   if (status === 504 || status === 502) {
-    return "Overpass gateway timed out (504). The public Overpass API is overloaded — try a smaller area, zoom in, or try again in a moment.";
+    return "The map service is overloaded right now. Try a smaller area, zoom in, or try again in a moment.";
   }
   if (status === 503) {
-    return "Overpass server is busy (503). Try again in a moment or zoom in to shrink the query.";
+    return "The map service is busy. Try again in a moment, or zoom in to shrink the area.";
   }
   if (status === 429) {
-    return "Overpass rate limit hit (429). Wait a moment before retrying.";
+    return "Too many searches in a short time. Wait a moment before retrying.";
   }
   if (status === 400) {
-    const snippet = stripHtml(body).slice(0, 240).trim();
-    return snippet
-      ? `Overpass rejected the query (400). ${snippet}`
-      : "Overpass rejected the query (400). Check your raw Overpass QL for syntax errors.";
+    return "That search wasn't valid. Try a simpler tag or a smaller area.";
   }
-  const snippet = stripHtml(body).slice(0, 200).trim();
-  return snippet
-    ? `Overpass request failed (${status}). ${snippet}`
-    : `Overpass request failed (${status}).`;
-}
-
-function stripHtml(input: string): string {
-  return input
-    .replace(/<!DOCTYPE[^>]*>/gi, "")
-    .replace(/<\?xml[^?]*\?>/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return "Search failed. Try again in a moment.";
 }
 
 export function overpassToGeoJSON(

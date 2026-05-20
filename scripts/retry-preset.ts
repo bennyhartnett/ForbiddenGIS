@@ -22,7 +22,7 @@ const response = await fetch("https://overpass-api.de/api/interpreter", {
   method: "POST",
   headers: {
     "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-    "User-Agent": "overpass-scout-view-tests/0.1",
+    "User-Agent": "forbiddengis-tests/0.1",
     Accept: "application/json",
   },
   body: new URLSearchParams({ data: query }),

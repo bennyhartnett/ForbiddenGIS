@@ -304,7 +304,7 @@ export function getFeatureTags(feature: GeoJSONFeature): Record<string, string> 
 
 export function getFeatureName(feature: GeoJSONFeature): string {
   const tags = getFeatureTags(feature);
-  return tags.name || tags.brand || tags.operator || "Unnamed OSM feature";
+  return tags.name || tags.brand || tags.operator || "Unnamed location";
 }
 
 export function getOsmType(feature: GeoJSONFeature): string | undefined {
@@ -372,7 +372,7 @@ export function selectedFeatureFromProperties(
 
   return {
     scoutId,
-    name: tags.name || tags.brand || tags.operator || "Unnamed OSM feature",
+    name: tags.name || tags.brand || tags.operator || "Unnamed location",
     osmType: typeof properties.type === "string" ? properties.type : undefined,
     osmId:
       typeof properties.id === "string" || typeof properties.id === "number"
