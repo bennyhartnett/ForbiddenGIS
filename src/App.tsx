@@ -39,6 +39,13 @@ import {
 } from "./lib/spatialFilters";
 import { MAP_THEMES, type ThemeId } from "./lib/mapThemes";
 import { OVERLAY_SOURCES, type OverlayId } from "./lib/overlays";
+import {
+  DEFAULT_FEATURE_COLORS,
+  FEATURE_KINDS,
+  featureKindFor,
+  resolveFeatureColors,
+  type FeatureKind,
+} from "./lib/featureColors";
 
 type Mode = "preset" | "simple" | "raw";
 type MapDisplayType = "roadmap" | "satellite" | "hybrid" | "terrain";
@@ -163,6 +170,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const lastRequestKeyRef = useRef<string | null>(null);
   const selectedDataFeatureRef = useRef<google.maps.Data.Feature | null>(null);
   const dataFeatureClickRef = useRef<(feature: google.maps.Data.Feature) => void>(() => undefined);
+  const featureColorMapRef = useRef<Record<FeatureKind, string>>({ ...DEFAULT_FEATURE_COLORS });
   const streetViewLookupIdRef = useRef(0);
   const searchGateRef = useRef({
     mode: "preset" as Mode,
@@ -194,6 +202,13 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [tiltOn, setTiltOn] = useState(false);
   const [overlayId, setOverlayId] = useState<OverlayId>("none");
   const [overlayOpacity, setOverlayOpacity] = useState(0.8);
+  const [featureColorOverrides, setFeatureColorOverrides] = useState<
+    Partial<Record<FeatureKind, string>>
+  >({});
+  const [autoContrastColorsOn, setAutoContrastColorsOn] = useState(true);
+  const [presentFeatureKinds, setPresentFeatureKinds] = useState<ReadonlySet<FeatureKind>>(
+    () => new Set<FeatureKind>(),
+  );
   const [gibsDate, setGibsDate] = useState<string>(() => formatGibsDate(new Date()));
   const [visibleDiagonalKm, setVisibleDiagonalKm] = useState<number | null>(null);
   const [showSearchHereChip, setShowSearchHereChip] = useState(false);
@@ -316,6 +331,27 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     map.setOptions({ styles: MAP_THEMES[mapTheme] ?? [] });
   }, [mapTheme]);
 
+  const effectiveFeatureColors = useMemo(
+    () =>
+      resolveFeatureColors(
+        presentFeatureKinds,
+        autoContrastColorsOn,
+        featureColorOverrides,
+      ),
+    [autoContrastColorsOn, featureColorOverrides, presentFeatureKinds],
+  );
+
+  // Keep the style callback's color source in sync and re-render the data layer.
+  useEffect(() => {
+    featureColorMapRef.current = effectiveFeatureColors;
+    const map = mapRef.current;
+    const maps = mapsRef.current;
+    if (!map || !maps) return;
+    map.data.setStyle((feature) =>
+      styleForDataFeature(maps, feature, featureColorMapRef.current),
+    );
+  }, [effectiveFeatureColors]);
+
   // Tilt control
   useEffect(() => {
     const map = mapRef.current;
@@ -430,6 +466,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       if (!map) return;
       clearDataLayer();
       map.data.addGeoJson(collection);
+      setPresentFeatureKinds(collectFeatureKinds(collection));
     },
     [clearDataLayer],
   );
@@ -448,6 +485,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     setSearchWarning(null);
     setShowSearchHereChip(false);
     setLoading(false);
+    setPresentFeatureKinds(new Set<FeatureKind>());
   }, [clearDataLayer, closeStreetView]);
 
   const handleSearch = useCallback(async () => {
@@ -723,7 +761,9 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         mapRef.current = map;
         streetViewServiceRef.current = new maps.maps.StreetViewService();
         geocoderRef.current = new maps.maps.Geocoder();
-        map.data.setStyle((feature) => styleForDataFeature(maps, feature));
+        map.data.setStyle((feature) =>
+          styleForDataFeature(maps, feature, featureColorMapRef.current),
+        );
 
         void maps.maps
           .importLibrary("places")
@@ -894,6 +934,23 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           onOverlayChange={setOverlayId}
           overlayOpacity={overlayOpacity}
           onOverlayOpacityChange={setOverlayOpacity}
+          featureColors={effectiveFeatureColors}
+          featureColorOverrides={featureColorOverrides}
+          onFeatureColorChange={(kind, color) =>
+            setFeatureColorOverrides((prev) => ({ ...prev, [kind]: color }))
+          }
+          onFeatureColorReset={(kind) =>
+            setFeatureColorOverrides((prev) => {
+              if (!(kind in prev)) return prev;
+              const next = { ...prev };
+              delete next[kind];
+              return next;
+            })
+          }
+          onFeatureColorResetAll={() => setFeatureColorOverrides({})}
+          autoContrast={autoContrastColorsOn}
+          onAutoContrastChange={setAutoContrastColorsOn}
+          presentFeatureKinds={presentFeatureKinds}
         />
 
         <MapControls
@@ -1352,7 +1409,24 @@ function LayersPanel(props: {
   onOverlayChange: (next: OverlayId) => void;
   overlayOpacity: number;
   onOverlayOpacityChange: (value: number) => void;
+  featureColors: Record<FeatureKind, string>;
+  featureColorOverrides: Partial<Record<FeatureKind, string>>;
+  onFeatureColorChange: (kind: FeatureKind, color: string) => void;
+  onFeatureColorReset: (kind: FeatureKind) => void;
+  onFeatureColorResetAll: () => void;
+  autoContrast: boolean;
+  onAutoContrastChange: (value: boolean) => void;
+  presentFeatureKinds: ReadonlySet<FeatureKind>;
 }) {
+  const presentKinds = useMemo(() => {
+    const inResults = FEATURE_KINDS.filter((meta) => props.presentFeatureKinds.has(meta.kind));
+    if (inResults.length > 0) return inResults;
+    return FEATURE_KINDS.filter((meta) => meta.group === "result");
+  }, [props.presentFeatureKinds]);
+
+  const showingPresent = props.presentFeatureKinds.size > 0;
+  const resultKindsPresent = presentKinds.filter((meta) => meta.group === "result").length;
+  const overrideCount = Object.keys(props.featureColorOverrides).length;
   return (
     <aside className={`panel layers-panel ${props.open ? "" : "collapsed"}`} aria-label="Layers">
       <div className="panel-header">
@@ -1463,6 +1537,87 @@ function LayersPanel(props: {
                 aria-label="Overlay opacity"
               />
             </div>
+          ) : null}
+        </div>
+
+        <div className="panel-section">
+          <p className="panel-section-title">Feature colors</p>
+          <label className="toggle-row">
+            <span>
+              High-contrast multi-type
+              <small>
+                When results include more than one type (e.g., public vs private roads), give each
+                a distinct color.
+              </small>
+            </span>
+            <span className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={props.autoContrast}
+                onChange={(event) => props.onAutoContrastChange(event.target.checked)}
+              />
+              <span className="slider" />
+            </span>
+          </label>
+
+          <p className="search-suggestion-status" style={{ padding: 0 }}>
+            {showingPresent
+              ? `${resultKindsPresent} type${resultKindsPresent === 1 ? "" : "s"} in current results.`
+              : "Run a search to see the types appearing on the map. Defaults are orange."}
+          </p>
+
+          <div className="feature-color-list">
+            {presentKinds.map((meta) => {
+              const isOverridden = meta.kind in props.featureColorOverrides;
+              const color = props.featureColors[meta.kind];
+              return (
+                <div key={meta.kind} className="feature-color-row">
+                  <input
+                    type="color"
+                    value={color}
+                    onChange={(event) => props.onFeatureColorChange(meta.kind, event.target.value)}
+                    aria-label={`Color for ${meta.label}`}
+                  />
+                  <span className="feature-color-label">
+                    {meta.label}
+                    <small>
+                      {meta.group === "context"
+                        ? "Context layer"
+                        : isOverridden
+                          ? "Custom color"
+                          : props.autoContrast &&
+                              props.presentFeatureKinds.has(meta.kind) &&
+                              resultKindsPresent > 1
+                            ? "Auto high-contrast"
+                            : "Default"}
+                    </small>
+                  </span>
+                  {isOverridden ? (
+                    <button
+                      type="button"
+                      className="feature-color-reset"
+                      onClick={() => props.onFeatureColorReset(meta.kind)}
+                      aria-label={`Reset color for ${meta.label}`}
+                      title="Reset to default"
+                    >
+                      Reset
+                    </button>
+                  ) : (
+                    <span aria-hidden="true" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {overrideCount > 0 ? (
+            <button
+              type="button"
+              className="feature-color-reset-all"
+              onClick={props.onFeatureColorResetAll}
+            >
+              Reset all colors
+            </button>
           ) : null}
         </div>
       </div>
@@ -2351,11 +2506,14 @@ function mapBoundsWarning(
 function styleForDataFeature(
   maps: typeof google,
   feature: google.maps.Data.Feature,
+  colorMap: Record<FeatureKind, string>,
 ): google.maps.Data.StyleOptions {
   const role = readDataString(feature, "scoutRole", "result") as ScoutRole;
   const category = readDataString(feature, "scoutCategory", "simple") as ScoutCategory;
+  const tags = readDataTags(feature);
+  const kind = featureKindFor(category, role, tags);
   const selected = Boolean(feature.getProperty("scoutSelected"));
-  const color = selected ? "#1a73e8" : colorForCategory(category, role);
+  const color = selected ? "#1a73e8" : colorMap[kind] ?? DEFAULT_FEATURE_COLORS[kind];
   const isContext = role.startsWith("context");
   const geometryType = feature.getGeometry()?.getType();
 
@@ -2392,48 +2550,29 @@ function styleForDataFeature(
   };
 }
 
-function colorForCategory(category: ScoutCategory, role: ScoutRole): string {
-  if (role === "context-building") return "#9aa0a6";
-  if (role === "context-water") return "#4285f4";
-  if (role === "context-road") return "#5f6368";
-  if (role === "context-parking") return "#8430ce";
-  if (role === "context-woods") return "#137333";
-  if (role === "context-park") return "#0f9d58";
-  if (role === "context-pull-off") return "#a142f4";
-  if (role === "context-trail") return "#34a853";
-  if (role === "context-industrial") return "#9aa0a6";
-
-  switch (category) {
-    case "road":
-      return "#5f6368";
-    case "parking":
-      return "#a142f4";
-    case "trail":
-      return "#34a853";
-    case "bridge":
-      return "#fa7b17";
-    case "water":
-      return "#4285f4";
-    case "building":
-      return "#9aa0a6";
-    case "water-crossing":
-      return "#129eaf";
-    case "woods":
-      return "#137333";
-    case "park":
-      return "#0f9d58";
-    case "pull-off":
-      return "#8430ce";
-    case "barrier":
-      return "#d93025";
-    case "industrial":
-      return "#80868b";
-    case "off-road":
-      return "#673ab7";
-    case "simple":
-    default:
-      return "#e52592";
+function readDataTags(feature: google.maps.Data.Feature): Record<string, string> {
+  const raw = feature.getProperty("tags");
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === "string") out[key] = value;
+    else if (typeof value === "number" || typeof value === "boolean") out[key] = String(value);
   }
+  return out;
+}
+
+function collectFeatureKinds(
+  collection: GeoJSONFeatureCollection,
+): ReadonlySet<FeatureKind> {
+  const kinds = new Set<FeatureKind>();
+  for (const feature of collection.features) {
+    const props = feature.properties ?? {};
+    const role = (props.scoutRole ?? "result") as ScoutRole;
+    const category = (props.scoutCategory ?? "simple") as ScoutCategory;
+    const tags = props.tags ?? {};
+    kinds.add(featureKindFor(category, role, tags));
+  }
+  return kinds;
 }
 
 function readDataString(
