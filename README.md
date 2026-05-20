@@ -55,6 +55,10 @@ The Vite base path is `/` locally. In CI, it uses `/` for repositories ending in
 
 Simple tag search supports only `key=value` and `key=*`, such as `amenity=restaurant` or `building=*`. It does not accept raw Overpass QL.
 
+Raw Overpass QL mode accepts pasted Overpass Turbo-style queries. Use `{{bbox}}` in the pasted query to scope it to the current map view.
+
+Location suggestions use the Google Maps Places library. If suggestions do not appear, enable the relevant Places API for the same Google Cloud key; typed location search still falls back to geocoding.
+
 ## Data and legal cautions
 
 Map data/results come from OpenStreetMap via Overpass API. Basemap and Street View come from Google Maps.

@@ -38,7 +38,7 @@ import {
   prepareSimpleResult,
 } from "./lib/spatialFilters";
 
-type Mode = "simple" | "preset";
+type Mode = "simple" | "preset" | "raw";
 type MapDisplayType = "roadmap" | "satellite" | "hybrid" | "terrain";
 type DifficultyLevel = "blocked" | "low" | "moderate" | "high" | "very-high";
 
@@ -47,6 +47,13 @@ interface DifficultyEstimate {
   label: string;
   detail: string;
   scope: string;
+}
+
+interface PlaceSuggestion {
+  description: string;
+  placeId: string;
+  mainText: string;
+  secondaryText: string;
 }
 
 type StreetViewState =
@@ -70,6 +77,15 @@ const RENDER_LIMIT = 5000;
 const DEFAULT_CENTER: LatLng = { lat: 38.9072, lng: -77.0369 };
 const DEFAULT_ZOOM = 15;
 const DEFAULT_LOCATION_QUERY = "Washington, DC";
+const DEFAULT_RAW_QUERY = `[out:json][timeout:25];
+(
+  node["amenity"="restaurant"]({{bbox}});
+  way["amenity"="restaurant"]({{bbox}});
+  relation["amenity"="restaurant"]({{bbox}});
+);
+out body;
+>;
+out skel qt;`;
 
 export default function App() {
   const apiKey = getGoogleMapsApiKey();
@@ -89,6 +105,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const mapsRef = useRef<typeof google | null>(null);
   const streetViewServiceRef = useRef<google.maps.StreetViewService | null>(null);
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
+  const autocompleteServiceRef = useRef<google.maps.places.AutocompleteService | null>(null);
   const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const lastRequestKeyRef = useRef<string | null>(null);
@@ -103,8 +120,11 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
   const [mode, setMode] = useState<Mode>("simple");
   const [tagFilter, setTagFilter] = useState("amenity=restaurant");
+  const [rawQuery, setRawQuery] = useState(DEFAULT_RAW_QUERY);
   const [locationQuery, setLocationQuery] = useState(DEFAULT_LOCATION_QUERY);
   const [locationStatus, setLocationStatus] = useState("Scoped to Washington, DC.");
+  const [placeSuggestions, setPlaceSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [suggestionsStatus, setSuggestionsStatus] = useState<string | null>(null);
   const [presetId, setPresetId] = useState<PresetId>("road-adjacent-parking");
   const [showBuildings, setShowBuildings] = useState(false);
   const [showWater, setShowWater] = useState(true);
@@ -125,8 +145,16 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const selectedPreset = useMemo(() => getPresetById(presetId), [presetId]);
   const activeWarning = searchWarning ?? boundsWarning;
   const difficultyEstimate = useMemo(
-    () => computeDifficultyEstimate(mode, zoom, tagFilter, selectedPreset, visibleDiagonalKm),
-    [mode, selectedPreset, tagFilter, visibleDiagonalKm, zoom],
+    () =>
+      computeDifficultyEstimate(
+        mode,
+        zoom,
+        tagFilter,
+        rawQuery,
+        selectedPreset,
+        visibleDiagonalKm,
+      ),
+    [mode, rawQuery, selectedPreset, tagFilter, visibleDiagonalKm, zoom],
   );
 
   useEffect(() => {
@@ -141,6 +169,53 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       syncLiveMapState(map, mode, tagFilter, selectedPreset.minZoom, setZoom, setVisibleDiagonalKm, setBoundsWarning);
     }
   }, [mode, selectedPreset.minZoom, tagFilter]);
+
+  useEffect(() => {
+    const input = locationQuery.trim();
+    const service = autocompleteServiceRef.current;
+
+    if (!service || input.length < 3) {
+      setPlaceSuggestions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setSuggestionsStatus(null);
+
+      void service
+        .getPlacePredictions({
+          input,
+          componentRestrictions: { country: "us" },
+        })
+        .then((response) => {
+          if (cancelled) {
+            return;
+          }
+
+          const suggestions =
+            response.predictions?.slice(0, 5).map((prediction) => ({
+              description: prediction.description,
+              placeId: prediction.place_id,
+              mainText: prediction.structured_formatting?.main_text ?? prediction.description,
+              secondaryText: prediction.structured_formatting?.secondary_text ?? "",
+            })) ?? [];
+
+          setPlaceSuggestions(suggestions);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setPlaceSuggestions([]);
+            setSuggestionsStatus("Place suggestions unavailable; location search still works.");
+          }
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [locationQuery]);
 
   const clearDataLayer = useCallback(() => {
     const map = mapRef.current;
@@ -296,9 +371,12 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         parsedFilter = parseTagFilter(tagFilter);
         query = buildSimpleOverpassQuery(bbox, parsedFilter);
         requestLabel = parsedFilter.label;
-      } else {
+      } else if (mode === "preset") {
         query = buildPresetOverpassQuery(selectedPreset, bbox, presetOptions);
         requestLabel = selectedPreset.name;
+      } else {
+        query = prepareRawOverpassQuery(rawQuery, bbox);
+        requestLabel = "Raw Overpass QL";
       }
     } catch (parseError) {
       setError(parseError instanceof Error ? parseError.message : "Invalid search input.");
@@ -354,11 +432,18 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
                 ? `Matched ${parsedFilter.label}`
                 : "Matched simple tag search",
             })
-          : applyPresetSpatialFilters(overpass.geojson.features, selectedPreset, {
-              includeBuildings: showBuildings,
-              includeWater: showWater,
-              renderLimit: RENDER_LIMIT,
-            });
+          : mode === "preset"
+            ? applyPresetSpatialFilters(overpass.geojson.features, selectedPreset, {
+                includeBuildings: showBuildings,
+                includeWater: showWater,
+                renderLimit: RENDER_LIMIT,
+              })
+            : prepareSimpleResult(overpass.geojson.features, {
+                includeBuildings: false,
+                includeWater: false,
+                renderLimit: RENDER_LIMIT,
+                simpleMatchLabel: "Matched raw Overpass QL",
+              });
 
       renderFeatures({
         type: "FeatureCollection",
@@ -389,6 +474,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     loading,
     mode,
     renderFeatures,
+    rawQuery,
     selectedPreset,
     showBuildings,
     showWater,
@@ -412,7 +498,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   }, [runStreetViewLookup]);
 
   const scopeToLocation = useCallback(
-    (queryOverride?: string) => {
+    (queryOverride?: string, placeId?: string) => {
       const map = mapRef.current;
       const geocoder = geocoderRef.current;
       const query = (queryOverride ?? locationQuery).trim();
@@ -428,9 +514,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       }
 
       setError(null);
+      setPlaceSuggestions([]);
       setLocationStatus(`Finding ${query}...`);
 
-      geocoder.geocode({ address: query }, (results, status) => {
+      geocoder.geocode(placeId ? { placeId } : { address: query }, (results, status) => {
         const result = results?.[0];
 
         if (status !== "OK" || !result) {
@@ -555,6 +642,15 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         streetViewServiceRef.current = new maps.maps.StreetViewService();
         geocoderRef.current = new maps.maps.Geocoder();
         map.data.setStyle((feature) => styleForDataFeature(maps, feature));
+        void maps.maps.importLibrary("places").then((placesLibrary) => {
+          if (!cancelled && "AutocompleteService" in placesLibrary) {
+            autocompleteServiceRef.current = new placesLibrary.AutocompleteService();
+          }
+        }).catch(() => {
+          if (!cancelled) {
+            setSuggestionsStatus("Place suggestions unavailable; location search still works.");
+          }
+        });
         const syncCurrentMapState = () => {
           const gate = searchGateRef.current;
           syncLiveMapState(
@@ -644,10 +740,29 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
             <input
               id="location-search"
               value={locationQuery}
-              onChange={(event) => setLocationQuery(event.target.value)}
+              onChange={(event) => {
+                setLocationQuery(event.target.value);
+                setSuggestionsStatus(null);
+              }}
               placeholder="Washington, DC"
+              autoComplete="off"
               spellCheck={false}
             />
+            {placeSuggestions.length > 0 ? (
+              <div className="suggestion-list" role="listbox" aria-label="Location suggestions">
+                {placeSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.placeId}
+                    type="button"
+                    className="suggestion-option"
+                    onClick={() => scopeToLocation(suggestion.description, suggestion.placeId)}
+                  >
+                    <span>{suggestion.mainText}</span>
+                    {suggestion.secondaryText ? <small>{suggestion.secondaryText}</small> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <div className="inline-actions">
               <button type="submit">Go to location</button>
               <button type="button" onClick={scopeToWashingtonDc}>
@@ -656,6 +771,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
             </div>
           </form>
           <p className="query-summary">{locationStatus}</p>
+          {suggestionsStatus ? <p className="muted">{suggestionsStatus}</p> : null}
         </section>
 
         <section className="control-section">
@@ -671,9 +787,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           >
             <option value="simple">Simple tag search</option>
             <option value="preset">Premade queries</option>
+            <option value="raw">Raw Overpass QL</option>
           </select>
           <p className="query-summary">
-            Current: {mode === "simple" ? tagFilter : selectedPreset.name}
+            Current: {mode === "simple" ? tagFilter : mode === "preset" ? selectedPreset.name : "Raw Overpass QL"}
           </p>
         </section>
 
@@ -700,7 +817,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
               ))}
             </div>
           </section>
-        ) : (
+        ) : mode === "preset" ? (
           <section className="control-section">
             <label htmlFor="premade-query">Premade query</label>
             <select
@@ -733,6 +850,22 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
               />
               <span>Show context water</span>
             </label>
+          </section>
+        ) : (
+          <section className="control-section">
+            <label htmlFor="raw-query">Raw Overpass QL</label>
+            <textarea
+              id="raw-query"
+              className="raw-query-input"
+              value={rawQuery}
+              onChange={(event) => setRawQuery(event.target.value)}
+              spellCheck={false}
+              rows={12}
+            />
+            <p className="muted">
+              Paste Overpass Turbo-style QL. Use <code>{"{{bbox}}"}</code> to scope the query to
+              the current map view.
+            </p>
           </section>
         )}
 
@@ -1031,6 +1164,13 @@ function validateSearchGate(
     return null;
   }
 
+  if (mode === "raw") {
+    if (zoom < 13) {
+      return "Zoom in to at least 13 before running a raw Overpass query.";
+    }
+    return null;
+  }
+
   if (zoom < presetMinZoom) {
     return `Zoom in to at least ${presetMinZoom} before running this premade query.`;
   }
@@ -1065,6 +1205,7 @@ function computeDifficultyEstimate(
   mode: Mode,
   zoom: number,
   tagFilter: string,
+  rawQuery: string,
   preset: PresetDefinition,
   visibleDiagonalKm: number | null,
 ): DifficultyEstimate {
@@ -1107,6 +1248,20 @@ function computeDifficultyEstimate(
     };
   }
 
+  if (mode === "raw") {
+    const hasBboxMacro = rawQuery.includes("{{bbox}}");
+    const level = estimateRawLevel(hasBboxMacro, visibleDiagonalKm);
+
+    return {
+      level,
+      label: labelForDifficulty(level),
+      detail: hasBboxMacro
+        ? "Raw QL will run exactly as pasted, with {{bbox}} replaced by the current map bounds."
+        : "Raw QL has no {{bbox}} macro, so it may ignore the current map scope and run broad.",
+      scope,
+    };
+  }
+
   const level = estimatePresetLevel(preset.id, visibleDiagonalKm);
   return {
     level,
@@ -1117,6 +1272,31 @@ function computeDifficultyEstimate(
         : "Premade scouting queries scan multiple OSM tags and may run spatial filters after Overpass returns data.",
     scope,
   };
+}
+
+function prepareRawOverpassQuery(rawQuery: string, bbox: BBox): string {
+  const trimmed = rawQuery.trim();
+
+  if (!trimmed) {
+    throw new Error("Paste an Overpass QL query before searching.");
+  }
+
+  if (!trimmed.includes("[out:json")) {
+    throw new Error("Raw queries must request JSON output, for example [out:json][timeout:25];");
+  }
+
+  const bboxText = [
+    bbox.south.toFixed(7),
+    bbox.west.toFixed(7),
+    bbox.north.toFixed(7),
+    bbox.east.toFixed(7),
+  ].join(",");
+
+  return trimmed
+    .replace(/\{\{\s*bbox\s*\}\}/gi, bboxText)
+    .replace(/\{\{\s*center\s*\}\}/gi, `${((bbox.south + bbox.north) / 2).toFixed(7)},${((bbox.west + bbox.east) / 2).toFixed(7)}`)
+    .replace(/\{\{\s*style:[\s\S]*?\}\}/gi, "")
+    .replace(/\{\{\s*style\s*\}\}/gi, "");
 }
 
 function estimateSimpleLevel(
@@ -1156,6 +1336,21 @@ function estimatePresetLevel(
   if (visibleDiagonalKm > 5) return "very-high";
   if (visibleDiagonalKm > 2.5) return "high";
   if (visibleDiagonalKm > 1.2) return "moderate";
+  return "low";
+}
+
+function estimateRawLevel(
+  hasBboxMacro: boolean,
+  visibleDiagonalKm: number | null,
+): DifficultyLevel {
+  if (!hasBboxMacro) {
+    return "very-high";
+  }
+
+  if (visibleDiagonalKm === null) return "high";
+  if (visibleDiagonalKm > 8) return "very-high";
+  if (visibleDiagonalKm > 4) return "high";
+  if (visibleDiagonalKm > 2) return "moderate";
   return "low";
 }
 
