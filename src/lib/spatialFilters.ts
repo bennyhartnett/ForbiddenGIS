@@ -126,21 +126,12 @@ const CAR_DRIVABLE_HIGHWAYS = new Set([
   "track",
 ]);
 const CAR_UNDRIVABLE_SURFACES = new Set([
-  "mud",
-  "sand",
-  "grass",
-  "earth",
-  "ground",
-  "rock",
-  "pebblestone",
   "stepping_stones",
   "snow",
   "ice",
 ]);
-const CAR_UNDRIVABLE_TRACKTYPES = new Set(["grade4", "grade5"]);
+const CAR_UNDRIVABLE_TRACKTYPES = new Set<string>();
 const CAR_UNDRIVABLE_SMOOTHNESS = new Set([
-  "bad",
-  "very_bad",
   "horrible",
   "very_horrible",
   "impassable",
@@ -981,10 +972,7 @@ export function isCarDrivable(tags: Record<string, string>): boolean {
   const highway = tags.highway?.toLowerCase();
   if (!highway || !CAR_DRIVABLE_HIGHWAYS.has(highway)) return false;
 
-  if (tags["4wd_only"]?.toLowerCase() === "yes") return false;
-  if (tags.hgv?.toLowerCase() === "only") return false;
-
-  for (const key of ["motor_vehicle", "motorcar", "vehicle"]) {
+  for (const key of ["motor_vehicle", "vehicle"]) {
     const value = tags[key]?.toLowerCase();
     if (value && CAR_FORBIDDEN_ACCESS.has(value)) return false;
   }
