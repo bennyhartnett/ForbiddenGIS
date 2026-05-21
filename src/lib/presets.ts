@@ -8,7 +8,7 @@ export interface PresetQueryOptions {
 }
 
 export const PRESETS: PresetDefinition[] = [
-  preset("preset-dirt-roads", "Dirt & Gravel Roads", "Tracks with gravel, dirt, sand, grass, or graded unpaved surfaces.", 14, false, false, false),
+  preset("preset-dirt-roads", "Dirt & Gravel Roads", "Tracks with gravel, dirt, sand, grass, or graded unpaved surfaces drivable by a Jeep or similar 4x4.", 14, false, false, false),
   preset("preset-alleys", "Alleys & Service Lanes", "Back-lot alleys and service lanes threading between buildings.", 14, false, false, false),
   preset("preset-01", "Public Off-Road Routes", "Tracks and rough roads with no private or restricted access tags.", 14, true, true, false),
   preset("preset-02", "Private Off-Road Routes", "Tracks and rough roads tagged private, restricted, or destination-only.", 14, true, true, false),
@@ -196,10 +196,14 @@ function roadClauses(bbox: string): string[] {
 }
 
 function dirtRoadClauses(bbox: string): string[] {
+  const drivableHighway = `^(unclassified|residential|service|living_street|tertiary|secondary|track)$`;
+  const unpavedSurfaces = `^(gravel|fine_gravel|dirt|earth|ground|unpaved|compacted|sand|mud|grass)$`;
+  const undrivableSmoothness = `^(horrible|very_horrible|impassable)$`;
+  const forbiddenAccess = `^(no|private)$`;
   return [
-    `way["highway"]["surface"~"^(gravel|fine_gravel|dirt|earth|ground|unpaved|compacted|sand|mud|grass)$"](${bbox});`,
-    `way["highway"="track"]["tracktype"~"^(grade1|grade2|grade3|grade4|grade5)$"](${bbox});`,
-    `way["highway"="track"]["surface"!~"^(asphalt|paved|concrete|paving_stones|chipseal|metal|wood)$"](${bbox});`,
+    `way["highway"~"${drivableHighway}"]["surface"~"${unpavedSurfaces}"]["smoothness"!~"${undrivableSmoothness}"]["motor_vehicle"!~"${forbiddenAccess}"]["vehicle"!~"${forbiddenAccess}"](${bbox});`,
+    `way["highway"="track"]["tracktype"~"^(grade1|grade2|grade3|grade4|grade5)$"]["smoothness"!~"${undrivableSmoothness}"]["motor_vehicle"!~"${forbiddenAccess}"]["vehicle"!~"${forbiddenAccess}"](${bbox});`,
+    `way["highway"="track"]["surface"!~"^(asphalt|paved|concrete|paving_stones|chipseal|metal|wood)$"]["smoothness"!~"${undrivableSmoothness}"]["motor_vehicle"!~"${forbiddenAccess}"]["vehicle"!~"${forbiddenAccess}"](${bbox});`,
   ];
 }
 
