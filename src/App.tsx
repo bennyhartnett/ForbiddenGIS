@@ -83,11 +83,7 @@ const PRESET_CATEGORIES: PresetCategory[] = [
   {
     id: "off-road",
     label: "Off-road",
-    match: (preset) =>
-      /off-road|rough|unpaved|high-clearance|dirt/i.test(preset.name) ||
-      preset.id === "preset-15" ||
-      preset.id === "preset-16" ||
-      preset.id === "preset-dirt-roads",
+    match: (preset) => /off-road|rough|unpaved|high-clearance|dirt|gravel/i.test(preset.name),
   },
   {
     id: "parking",
@@ -97,27 +93,27 @@ const PRESET_CATEGORIES: PresetCategory[] = [
   {
     id: "water",
     label: "Water",
-    match: (preset) => /water|ford|bridge/i.test(preset.name),
+    match: (preset) => /water|ford|bridge|waterside/i.test(preset.name),
   },
   {
     id: "dead-end",
     label: "Dead ends",
-    match: (preset) => /dead end|cul de sac|cut-through|industrial dead/i.test(preset.name),
+    match: (preset) => /dead.?end|cul.de.sac|cut-through/i.test(preset.name),
   },
   {
     id: "quiet",
     label: "Quiet roads",
-    match: (preset) => /25 mile|low-speed|unlit|no-sidewalk|tree-lined/i.test(preset.name),
+    match: (preset) => /25\s?mph|low-speed|unlit|sidewalk|tree-lined|quiet/i.test(preset.name),
   },
   {
     id: "trails",
     label: "Trails",
-    match: (preset) => /trail|walking|pedestrian|cut-through/i.test(preset.name),
+    match: (preset) => /trail|walking|pedestrian|cut-through|path/i.test(preset.name),
   },
   {
     id: "barriers",
     label: "Barriers",
-    match: (preset) => /barrier|gated|fence|train track/i.test(preset.name),
+    match: (preset) => /barrier|gate|fence|train track/i.test(preset.name),
   },
 ];
 
@@ -1312,7 +1308,7 @@ function PresetPanel(props: {
             <input
               value={props.presetSearch}
               onChange={(event) => props.onPresetSearchChange(event.target.value)}
-              placeholder="Search 34 premade queries"
+              placeholder={`Search ${PRESETS.length} premade queries`}
               spellCheck={false}
             />
           </div>
@@ -2367,74 +2363,337 @@ function RefreshIcon() {
 }
 
 function PresetGlyph({ presetId }: { presetId: PresetId }) {
-  switch (true) {
-    case /^preset-(01|02|15|16)$/.test(presetId):
-    case presetId === "preset-dirt-roads":
+  switch (presetId) {
+    case "preset-dirt-roads":
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4 18c2-4 6-4 8 0s6 4 8 0" />
+          <path d="M3 16c2-4 6-4 8 0s6 4 8 0" />
+          <circle cx="6" cy="9" r="0.6" />
+          <circle cx="11" cy="6" r="0.6" />
+          <circle cx="16" cy="8" r="0.6" />
+          <circle cx="20" cy="11" r="0.6" />
         </svg>
       );
-    case presetId === "preset-alleys":
+    case "preset-alleys":
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M6 4v16M18 4v16M6 12h12" />
+          <path d="M3 4v16M9 4v16M15 4v16M21 4v16" />
+          <path d="M9 12h6" />
         </svg>
       );
-    case /^preset-(05|08|17|24|21)$/.test(presetId):
+    case "preset-01":
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M3 14c3-3 5-3 8 0s5 3 8 0" />
-          <path d="M3 18c3-3 5-3 8 0s5 3 8 0" />
+          <path d="M3 17c1.5-2 3-2 4.5 0s3 2 4.5 0 3-2 4.5 0" />
+          <path d="M15 7l3 3 5-5" />
         </svg>
       );
-    case /^preset-(06|23)$/.test(presetId):
+    case "preset-02":
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M3 12h18M5 12V8m14 4V8M9 16v4m6-4v4" />
+          <path d="M3 18c1.5-2 3-2 4.5 0s3 2 4.5 0 3-2 4.5 0" />
+          <rect x="14" y="6" width="7" height="6" rx="1" />
+          <path d="M16 6V4a1.5 1.5 0 0 1 3 0v2" />
         </svg>
       );
-    case /^preset-(04|09|10|19|20|22)$/.test(presetId):
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="6" y="4" width="12" height="16" rx="2" />
-          <path d="M9 9h4a2 2 0 1 1 0 4H9z" />
-        </svg>
-      );
-    case /^preset-(07|11|18|28|33)$/.test(presetId):
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 4v9" />
-          <circle cx="12" cy="17" r="3" />
-        </svg>
-      );
-    case /^preset-(26|27|31|32)$/.test(presetId):
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M5 20s3-3 4-6 4-4 5-8" />
-          <circle cx="14" cy="6" r="1.5" />
-        </svg>
-      );
-    case /^preset-25$/.test(presetId):
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4 20V8m16 12V8M4 8h16M8 12h8M8 16h8" />
-        </svg>
-      );
-    case /^preset-03$/.test(presetId):
+    case "preset-03":
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="3" y="9" width="14" height="7" rx="2" />
+          <path d="M5 9V6h10v3" />
           <circle cx="7" cy="18" r="2" />
           <circle cx="14" cy="18" r="2" />
           <path d="M17 12h4l-2 4" />
         </svg>
       );
-    default:
+    case "preset-04":
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="3" />
-          <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
+          <rect x="4" y="3" width="16" height="18" rx="2" />
+          <path d="M9 7v10" />
+          <path d="M9 7h4a3 3 0 0 1 0 6h-4" />
+        </svg>
+      );
+    case "preset-05":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 8h18" />
+          <path d="M3 14c3-2 5-2 8 0s5 2 8 0" />
+          <path d="M3 19c3-2 5-2 8 0s5 2 8 0" />
+        </svg>
+      );
+    case "preset-06":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 9c5-3 13-3 18 0" />
+          <path d="M3 9v11M21 9v11" />
+          <path d="M9 20v-7M15 20v-7" />
+          <path d="M3 20h18" />
+        </svg>
+      );
+    case "preset-07":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4v9" />
+          <circle cx="12" cy="17" r="3" />
+          <path d="M3 5l2 2M5 5l-2 2" />
+          <path d="M19 5l2 2M21 5l-2 2" />
+        </svg>
+      );
+    case "preset-08":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 12h11" />
+          <path d="M11 9l3 3-3 3" />
+          <path d="M17 8c2 0 2 4 4 4" />
+          <path d="M17 14c2 0 2 4 4 4" />
+        </svg>
+      );
+    case "preset-09":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 18h18" />
+          <rect x="8" y="3" width="9" height="10" rx="1" />
+          <path d="M11 5v6" />
+          <path d="M11 5h2.5a1.5 1.5 0 0 1 0 3H11" />
+        </svg>
+      );
+    case "preset-10":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="8" y="3" width="9" height="10" rx="1" />
+          <path d="M11 5v6" />
+          <path d="M11 5h2.5a1.5 1.5 0 0 1 0 3H11" />
+          <path d="M3 18l2 2M5 18l-2 2" />
+          <path d="M19 18l2 2M21 18l-2 2" />
+        </svg>
+      );
+    case "preset-11":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="4" cy="11" r="2" />
+          <path d="M4 13v7" />
+          <circle cx="20" cy="11" r="2" />
+          <path d="M20 13v7" />
+          <path d="M7 11h1M10 11h1M13 11h1M16 11h1" />
+        </svg>
+      );
+    case "preset-12":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="6" y="3" width="12" height="14" rx="1" />
+          <path d="M9 7h6" />
+          <path d="M9 11h6" />
+          <path d="M3 19l2 2M5 19l-2 2" />
+          <path d="M19 19l2 2M21 19l-2 2" />
+        </svg>
+      );
+    case "preset-13":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="3" width="11" height="13" rx="1" />
+          <path d="M5 7h7" />
+          <path d="M5 11h7" />
+          <path d="M19 4l-2 5h4z" />
+          <path d="M19 9v12" />
+        </svg>
+      );
+    case "preset-14":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 4v16M20 4v16" />
+          <path d="M9 4v16M15 4v16" />
+          <path d="M12 5v3M12 11v3M12 17v3" />
+        </svg>
+      );
+    case "preset-15":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 12h3M9 12h3M15 12h3M21 12h.1" />
+          <path d="M4 5l2 2M6 5l-2 2" />
+          <path d="M18 5l2 2M20 5l-2 2" />
+          <path d="M4 19l2 2M6 19l-2 2" />
+          <path d="M18 19l2 2M20 19l-2 2" />
+        </svg>
+      );
+    case "preset-16":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 18l4-7 4 4 5-9 5 6 2-3" />
+        </svg>
+      );
+    case "preset-17":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 12h12" />
+          <path d="M15 6c2-1 4-1 6 0" />
+          <path d="M15 12c2-1 4-1 6 0" />
+          <path d="M15 18c2-1 4-1 6 0" />
+        </svg>
+      );
+    case "preset-18":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 6l-1 4h2zM3 10v3" />
+          <path d="M21 6l-1 4h2zM21 10v3" />
+          <path d="M12 4v9" />
+          <circle cx="12" cy="17" r="3" />
+        </svg>
+      );
+    case "preset-19":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 12l-2 5h4z" />
+          <path d="M5 17v4" />
+          <rect x="11" y="8" width="10" height="13" rx="1" />
+          <path d="M14 11v8" />
+          <path d="M14 11h3a2 2 0 0 1 0 4h-3" />
+        </svg>
+      );
+    case "preset-20":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 9h18" />
+          <path d="M3 18h7" />
+          <path d="M10 18v-3h4v3" />
+          <path d="M14 18h7" />
+        </svg>
+      );
+    case "preset-21":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="3" width="11" height="11" rx="1" />
+          <path d="M6 6v6" />
+          <path d="M6 6h3.5a2 2 0 0 1 0 4H6" />
+          <path d="M3 18c3-2 5-2 8 0s5 2 8 0" />
+          <path d="M3 22c3-2 5-2 8 0s5 2 8 0" />
+        </svg>
+      );
+    case "preset-22":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="6" width="10" height="13" rx="1" />
+          <path d="M6 9v8" />
+          <path d="M6 9h3a2 2 0 0 1 0 4H6" />
+          <path d="M18 4l-2 5h4zM18 9v3" />
+          <path d="M18 13l-2 5h4zM18 18v3" />
+        </svg>
+      );
+    case "preset-23":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 10h18M5 10V6M19 10V6" />
+          <path d="M9 14v4M15 14v4" />
+          <path d="M3 18h4" />
+          <path d="M7 18v-2h4v2" />
+          <path d="M11 18h10" />
+        </svg>
+      );
+    case "preset-24":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 12h18" />
+          <path d="M8 3c1.5 2 1.5 4 0 6s-1.5 4 0 6 1.5 4 0 6" />
+          <path d="M16 3c1.5 2 1.5 4 0 6s-1.5 4 0 6 1.5 4 0 6" />
+        </svg>
+      );
+    case "preset-25":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 4v16M12 4v16M20 4v16" />
+          <path d="M4 9h16M4 14h16" />
+          <path d="M4 9l8 5M12 9l8 5" />
+        </svg>
+      );
+    case "preset-26":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 3v18" />
+          <path d="M6 3h6l-2 3 2 3H6" />
+          <rect x="14" y="10" width="7" height="11" rx="1" />
+          <path d="M16 12v7" />
+          <path d="M16 12h2.5a1.5 1.5 0 0 1 0 3H16" />
+        </svg>
+      );
+    case "preset-27":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="2" y="4" width="7" height="10" rx="1" />
+          <path d="M4 7v4" />
+          <path d="M4 7h2a1.5 1.5 0 0 1 0 3H4" />
+          <path d="M11 16l1 1M14 18l1 1" />
+          <path d="M18 19c1-1 2-1 3 0" />
+          <path d="M18 22c1-1 2-1 3 0" />
+        </svg>
+      );
+    case "preset-28":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 4v6" />
+          <circle cx="3" cy="13" r="2" />
+          <path d="M8 14l1 1M12 16l1 1" />
+          <path d="M17 18c1-1 2-1 3 0" />
+          <path d="M17 21c1-1 2-1 3 0" />
+        </svg>
+      );
+    case "preset-29":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 14c-2-1-3-3-3-5a6 6 0 0 1 12 0c0 2-1 4-3 5" />
+          <path d="M10 17h4" />
+          <path d="M11 20h2" />
+          <path d="M3 3l18 18" />
+        </svg>
+      );
+    case "preset-30":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 3v18M15 3v18" />
+          <path d="M12 4v3M12 11v3M12 18v3" />
+          <path d="M3 9l3 3M3 12l3-3" />
+          <path d="M21 9l-3 3M21 12l-3-3" />
+        </svg>
+      );
+    case "preset-31":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="6" width="7" height="12" />
+          <rect x="14" y="6" width="7" height="12" />
+          <path d="M10 12h1M12 12h1M14 12h.1" />
+        </svg>
+      );
+    case "preset-32":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 14h18" />
+          <path d="M9 3l6 18" />
+          <path d="M9 3l4 1-1 3-3-1" />
+        </svg>
+      );
+    case "preset-33":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 20V11h6V7l6 4v9z" />
+          <path d="M5 15v2M11 15v2" />
+          <path d="M19 8v8" />
+          <circle cx="19" cy="19" r="2" />
+        </svg>
+      );
+    case "preset-34":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 3v18M15 3v18" />
+          <path d="M4 4l-1 3h2zM4 7v3" />
+          <path d="M4 13l-1 3h2zM4 16v3" />
+          <path d="M20 4l-1 3h2zM20 7v3" />
+          <path d="M20 13l-1 3h2zM20 16v3" />
+        </svg>
+      );
+    case "preset-35":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 3v18M16 3v18" />
+          <path d="M6 6h12M6 10h12M6 14h12M6 18h12" />
         </svg>
       );
   }
