@@ -1860,8 +1860,99 @@ p {
   min-width: 320px;
   background: var(--surface);
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   box-shadow: var(--shadow-3);
+}
+
+.street-view-time-slider {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 16px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.street-view-time-slider.single {
+  grid-template-columns: 1fr;
+}
+
+.street-view-time-slider .time-label {
+  display: grid;
+}
+
+.street-view-time-slider .time-label strong {
+  font-size: 0.88rem;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.street-view-time-slider .time-label small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.street-view-time-slider input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--line-strong);
+  border-radius: 999px;
+  border: none;
+}
+
+.street-view-time-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+  border: 2px solid var(--surface);
+  box-shadow: 0 1px 2px rgba(60, 64, 67, 0.4);
+}
+
+.street-view-time-slider input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+  border: 2px solid var(--surface);
+  box-shadow: 0 1px 2px rgba(60, 64, 67, 0.4);
+}
+
+.street-view-time-slider .nudge {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  padding: 0;
+  border: none;
+}
+
+.street-view-time-slider .nudge:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.street-view-time-slider .nudge svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.street-view-time-slider .nudge:not(:disabled):hover svg {
+  stroke: var(--ink);
 }
 
 .street-view-header {

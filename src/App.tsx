@@ -71,6 +71,12 @@ interface PlaceSuggestion {
   secondaryText: string;
 }
 
+interface PanoEntry {
+  panoId: string;
+  date: Date;
+  label: string;
+}
+
 type StreetViewState =
   | { status: "idle" }
   | { status: "searching"; sourceName: string }
@@ -246,6 +252,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const searchStartedAtRef = useRef<number | null>(null);
   const [selectedFeature, setSelectedFeature] = useState<SelectedFeature | null>(null);
   const [streetViewState, setStreetViewState] = useState<StreetViewState>({ status: "idle" });
+  const [panoHistory, setPanoHistory] = useState<PanoEntry[]>([]);
+  const [panoHistoryIndex, setPanoHistoryIndex] = useState(-1);
   const [resultFeatures, setResultFeatures] = useState<SelectedFeature[]>([]);
   const [matchListOpen, setMatchListOpen] = useState(false);
 
@@ -1026,7 +1034,34 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       motionTracking: false,
       motionTrackingControl: false,
     });
+    const entries = extractPanoHistory(streetViewState.data);
+    setPanoHistory(entries);
+    setPanoHistoryIndex(
+      entries.length > 0
+        ? Math.max(
+            0,
+            entries.findIndex((entry) => entry.panoId === location.pano),
+          )
+        : -1,
+    );
   }, [streetViewState]);
+
+  useEffect(() => {
+    if (streetViewState.status !== "open") {
+      setPanoHistory([]);
+      setPanoHistoryIndex(-1);
+    }
+  }, [streetViewState.status]);
+
+  const handlePanoHistoryChange = useCallback(
+    (index: number) => {
+      const entry = panoHistory[index];
+      if (!entry) return;
+      setPanoHistoryIndex(index);
+      panoramaRef.current?.setPano(entry.panoId);
+    },
+    [panoHistory],
+  );
 
   return (
     <div className="app-shell">
@@ -1222,6 +1257,12 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
                 Close
               </button>
             </div>
+            <StreetViewTimeSlider
+              entries={panoHistory}
+              activeIndex={panoHistoryIndex}
+              onChange={handlePanoHistoryChange}
+              fallbackDate={streetViewState.data.imageDate}
+            />
             <div ref={streetViewDivRef} className="street-view-canvas" />
           </section>
         ) : null}
@@ -2075,6 +2116,73 @@ function MapLegend(props: {
   );
 }
 
+/* ---------------- StreetViewTimeSlider ---------------- */
+
+function StreetViewTimeSlider({
+  entries,
+  activeIndex,
+  onChange,
+  fallbackDate,
+}: {
+  entries: PanoEntry[];
+  activeIndex: number;
+  onChange: (index: number) => void;
+  fallbackDate?: string;
+}) {
+  if (entries.length === 0) {
+    if (!fallbackDate) return null;
+    return (
+      <div className="street-view-time-slider single">
+        <span className="time-label">
+          <strong>Captured {fallbackDate}</strong>
+          <small>Only one capture available at this location</small>
+        </span>
+      </div>
+    );
+  }
+
+  const clampedIndex = Math.min(Math.max(activeIndex, 0), entries.length - 1);
+  const active = entries[clampedIndex];
+
+  return (
+    <div className="street-view-time-slider" aria-label="Street view capture date">
+      <div className="time-label">
+        <strong>{active.label}</strong>
+        <small>
+          Capture {clampedIndex + 1} of {entries.length}
+        </small>
+      </div>
+      <button
+        type="button"
+        className="nudge"
+        onClick={() => onChange(Math.max(0, clampedIndex - 1))}
+        disabled={clampedIndex <= 0}
+        aria-label="Older capture"
+      >
+        <ChevronLeftIcon />
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={entries.length - 1}
+        step={1}
+        value={clampedIndex}
+        onChange={(event) => onChange(Number(event.target.value))}
+        aria-label="Street view capture date"
+      />
+      <button
+        type="button"
+        className="nudge"
+        onClick={() => onChange(Math.min(entries.length - 1, clampedIndex + 1))}
+        disabled={clampedIndex >= entries.length - 1}
+        aria-label="Newer capture"
+      >
+        <ChevronRightIcon />
+      </button>
+    </div>
+  );
+}
+
 /* ---------------- TimeDock ---------------- */
 
 function TimeDock({
@@ -2905,6 +3013,40 @@ function formatGibsDate(date: Date): string {
   const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(date.getUTCDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function extractPanoHistory(data: google.maps.StreetViewPanoramaData): PanoEntry[] {
+  const raw = (data as unknown as { time?: unknown }).time;
+  if (!Array.isArray(raw)) return [];
+
+  const entries: PanoEntry[] = [];
+  for (const item of raw as Array<Record<string, unknown>>) {
+    const panoId =
+      typeof item.pano === "string"
+        ? item.pano
+        : typeof item.panoId === "string"
+          ? item.panoId
+          : null;
+    if (!panoId) continue;
+
+    const rawDate = item.date ?? item.d ?? item.imageDate;
+    const date =
+      rawDate instanceof Date
+        ? rawDate
+        : typeof rawDate === "string" || typeof rawDate === "number"
+          ? new Date(rawDate as string | number)
+          : null;
+    if (!date || Number.isNaN(date.getTime())) continue;
+
+    entries.push({
+      panoId,
+      date,
+      label: date.toLocaleDateString(undefined, { year: "numeric", month: "short" }),
+    });
+  }
+
+  entries.sort((a, b) => a.date.getTime() - b.date.getTime());
+  return entries;
 }
 
 function formatHumanDate(value: string): string {
