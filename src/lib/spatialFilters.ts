@@ -914,6 +914,22 @@ export function applyPresetSpatialFilters(
       }
       break;
     }
+
+    case "preset-weather":
+      for (const feature of features) {
+        const tags = getFeatureTags(feature);
+        if (!isWeatherStation(tags)) continue;
+        const operator = tags.operator?.toUpperCase() ?? "";
+        const isNws = operator === "NWS" || tags.source === "NWS";
+        addResult(
+          feature,
+          "weather-station",
+          isNws ? "NWS observation station" : "Weather station",
+          undefined,
+          tagDetail(tags, ["name", "operator", "ref", "ele", "man_made", "amenity"]),
+        );
+      }
+      break;
   }
 
   if (options.includeWater) {
@@ -965,6 +981,13 @@ export function isDirtRoad(tags: Record<string, string>): boolean {
     if (tags.tracktype) return true;
     return surface === undefined || !TRACK_PAVED_SURFACES.has(surface);
   }
+  return false;
+}
+
+export function isWeatherStation(tags: Record<string, string>): boolean {
+  if (tags.man_made === "weather_station") return true;
+  if (tags.amenity === "weather_station") return true;
+  if (tags.man_made === "monitoring_station" && tags["monitoring:weather"]) return true;
   return false;
 }
 

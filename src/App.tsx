@@ -27,6 +27,7 @@ import {
   runOverpassQuery,
   type ParsedTagFilter,
 } from "./lib/overpass";
+import { fetchNwsStationsInBBox } from "./lib/nws";
 import {
   buildPresetOverpassQuery,
   getPresetById,
@@ -119,6 +120,11 @@ const PRESET_CATEGORIES: PresetCategory[] = [
     id: "barriers",
     label: "Barriers",
     match: (preset) => /barrier|gate|fence|train track/i.test(preset.name),
+  },
+  {
+    id: "weather",
+    label: "Weather",
+    match: (preset) => /weather/i.test(preset.name),
   },
 ];
 
@@ -681,12 +687,22 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     );
 
     try {
-      const overpass = await runOverpassQuery(query, abortController.signal);
+      const includeNws = mode === "preset" && selectedPreset.id === "preset-weather";
+      const [overpass, nws] = await Promise.all([
+        runOverpassQuery(query, abortController.signal),
+        includeNws
+          ? fetchNwsStationsInBBox(bbox, abortController.signal)
+          : Promise.resolve(null),
+      ]);
       if (abortController.signal.aborted) return;
+
+      const overpassFeatures = nws
+        ? [...overpass.geojson.features, ...nws.features]
+        : overpass.geojson.features;
 
       const result =
         mode === "simple"
-          ? prepareSimpleResult(overpass.geojson.features, {
+          ? prepareSimpleResult(overpassFeatures, {
               includeBuildings: false,
               includeWater: false,
               renderLimit: RENDER_LIMIT,
@@ -695,12 +711,12 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
                 : "Matched simple tag search",
             })
           : mode === "preset"
-            ? applyPresetSpatialFilters(overpass.geojson.features, selectedPreset, {
+            ? applyPresetSpatialFilters(overpassFeatures, selectedPreset, {
                 includeBuildings: showBuildings,
                 includeWater: showWater,
                 renderLimit: RENDER_LIMIT,
               })
-            : prepareSimpleResult(overpass.geojson.features, {
+            : prepareSimpleResult(overpassFeatures, {
                 includeBuildings: false,
                 includeWater: false,
                 renderLimit: RENDER_LIMIT,
@@ -2837,6 +2853,14 @@ function PresetGlyph({ presetId }: { presetId: PresetId }) {
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M8 3v18M16 3v18" />
           <path d="M6 6h12M6 10h12M6 14h12M6 18h12" />
+        </svg>
+      );
+    case "preset-weather":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="9" cy="11" r="3" />
+          <path d="M16 9a3 3 0 0 1 0 6h-1" />
+          <path d="M6 18l-1 2M10 18l-1 2M14 18l-1 2M18 18l-1 2" />
         </svg>
       );
   }

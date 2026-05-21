@@ -45,6 +45,7 @@ export const PRESETS: PresetDefinition[] = [
   preset("preset-33", "Industrial Dead Ends", "Service roads and dead ends inside or beside industrial landuse.", 14, true, false, false),
   preset("preset-34", "Tree-Lined Low-Speed Roads", "Low-speed roads with tree-lined tags or nearby trees, no buildings.", 14, true, true, false),
   preset("preset-35", "Unfenced Train Tracks", "Active railway tracks with no mapped fence or wall within ~30 m.", 14, true, false, false),
+  preset("preset-weather", "Weather Stations", "OSM-tagged weather stations plus nearby official NWS observation stations (US only).", 8, false, false, false),
 ];
 
 export function getPresetById(id: PresetId): PresetDefinition {
@@ -188,7 +189,19 @@ function presetClauses(
       return [...lowSpeedClauses(boxes.bbox), `way["highway"]["tree_lined"](${boxes.bbox});`, ...treeClauses(boxes.bbox60m), ...woodsClauses(boxes.bbox60m), ...buildingClauses(boxes.bbox100ft)];
     case "preset-35":
       return [...railwayClauses(boxes.bbox), ...fenceClauses(boxes.bbox60m)];
+    case "preset-weather":
+      return weatherStationClauses(boxes.bbox);
   }
+}
+
+function weatherStationClauses(bbox: string): string[] {
+  return [
+    `node["man_made"="weather_station"](${bbox});`,
+    `way["man_made"="weather_station"](${bbox});`,
+    `node["amenity"="weather_station"](${bbox});`,
+    `node["man_made"="monitoring_station"]["monitoring:weather"="yes"](${bbox});`,
+    `node["man_made"="monitoring_station"]["monitoring:weather"](${bbox});`,
+  ];
 }
 
 function roadClauses(bbox: string): string[] {

@@ -58,7 +58,8 @@ export type ScoutCategory =
   | "barrier"
   | "industrial"
   | "off-road"
-  | "railway";
+  | "railway"
+  | "weather-station";
 
 export interface ScoutFeatureProperties {
   [key: string]: unknown;
@@ -131,7 +132,8 @@ export type PresetId =
   | "preset-32"
   | "preset-33"
   | "preset-34"
-  | "preset-35";
+  | "preset-35"
+  | "preset-weather";
 
 export interface PresetDefinition {
   id: PresetId;
