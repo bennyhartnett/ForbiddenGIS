@@ -930,6 +930,31 @@ export function applyPresetSpatialFilters(
         );
       }
       break;
+
+    case "preset-restricted":
+      for (const feature of features) {
+        const tags = getFeatureTags(feature);
+        const kind = classifyRestrictedArea(tags);
+        if (!kind) continue;
+        addResult(
+          feature,
+          "restricted",
+          kind.label,
+          undefined,
+          tagDetail(tags, [
+            "name",
+            "operator",
+            "military",
+            "landuse",
+            "boundary",
+            "amenity",
+            "gated",
+            "residential",
+            "access",
+          ]),
+        );
+      }
+      break;
   }
 
   if (options.includeWater) {
@@ -989,6 +1014,45 @@ export function isWeatherStation(tags: Record<string, string>): boolean {
   if (tags.amenity === "weather_station") return true;
   if (tags.man_made === "monitoring_station" && tags["monitoring:weather"]) return true;
   return false;
+}
+
+export function classifyRestrictedArea(
+  tags: Record<string, string>,
+): { label: string } | null {
+  if (tags.military) {
+    const military = tags.military.replace(/_/g, " ");
+    return { label: `Military · ${military}` };
+  }
+  if (tags.landuse === "military") {
+    return { label: "Military land" };
+  }
+  if (tags.boundary === "aboriginal_lands") {
+    return { label: "Aboriginal / tribal lands" };
+  }
+  if (tags.amenity === "prison") {
+    return { label: "Prison" };
+  }
+  if (tags.gated === "yes" || tags.residential === "gated") {
+    return { label: "Gated community" };
+  }
+  if (tags.boundary === "protected_area" && isRestrictedAccess(tags.access)) {
+    return { label: "Restricted protected area" };
+  }
+  const landuse = tags.landuse;
+  if (
+    landuse &&
+    ["industrial", "government", "institutional", "commercial"].includes(landuse) &&
+    isRestrictedAccess(tags.access)
+  ) {
+    const niceLanduse = landuse.charAt(0).toUpperCase() + landuse.slice(1);
+    return { label: `${niceLanduse} land, restricted access` };
+  }
+  return null;
+}
+
+function isRestrictedAccess(value?: string): boolean {
+  if (!value) return false;
+  return ["no", "private", "customers", "permit"].includes(value.toLowerCase());
 }
 
 export function isCarDrivable(tags: Record<string, string>): boolean {

@@ -132,6 +132,11 @@ const PRESET_CATEGORIES: PresetCategory[] = [
     label: "Weather",
     match: (preset) => /weather/i.test(preset.name),
   },
+  {
+    id: "restricted",
+    label: "Restricted",
+    match: (preset) => /restricted|private/i.test(preset.name),
+  },
 ];
 
 const SIMPLE_PRESETS = [
@@ -3039,6 +3044,13 @@ function PresetGlyph({ presetId }: { presetId: PresetId }) {
           <path d="M6 18l-1 2M10 18l-1 2M14 18l-1 2M18 18l-1 2" />
         </svg>
       );
+    case "preset-restricted":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M5 5l14 14" />
+        </svg>
+      );
   }
 }
 
@@ -3582,16 +3594,27 @@ function styleForDataFeature(
     geometryType === "MultiPolygon" ||
     category === "building" ||
     category === "water" ||
-    category === "parking";
+    category === "parking" ||
+    category === "restricted";
+
+  const isRestricted = category === "restricted";
 
   return {
     clickable: true,
     strokeColor: color,
-    strokeOpacity: selected ? 1 : isContext ? 0.68 : 0.9,
-    strokeWeight: selected ? 5 : category === "trail" ? 3 : 2,
+    strokeOpacity: selected ? 1 : isContext ? 0.68 : isRestricted ? 1 : 0.9,
+    strokeWeight: selected ? 5 : isRestricted ? 3 : category === "trail" ? 3 : 2,
     fillColor: color,
-    fillOpacity: isPolygon ? (selected ? 0.32 : isContext ? 0.12 : 0.2) : 0,
-    zIndex: selected ? 1000 : isContext ? 10 : 100,
+    fillOpacity: isPolygon
+      ? selected
+        ? 0.32
+        : isContext
+          ? 0.12
+          : isRestricted
+            ? 0.35
+            : 0.2
+      : 0,
+    zIndex: selected ? 1000 : isContext ? 10 : isRestricted ? 200 : 100,
   };
 }
 

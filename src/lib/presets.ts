@@ -46,6 +46,7 @@ export const PRESETS: PresetDefinition[] = [
   preset("preset-34", "Tree-Lined Low-Speed Roads", "Low-speed roads with tree-lined tags or nearby trees, no buildings.", 14, true, true, false),
   preset("preset-35", "Unfenced Train Tracks", "Active railway tracks with no mapped fence or wall within ~30 m.", 14, true, false, false),
   preset("preset-weather", "Weather Stations", "OSM-tagged weather stations plus nearby official NWS observation stations (US only).", 8, false, false, false),
+  preset("preset-restricted", "Restricted & Private Areas", "Military bases, gated communities, prisons, embassies, and other tagged no-entry zones. Overlay alongside other searches to spot land you can't drive into.", 12, false, false, false),
 ];
 
 export function getPresetById(id: PresetId): PresetDefinition {
@@ -191,7 +192,31 @@ function presetClauses(
       return [...railwayClauses(boxes.bbox), ...fenceClauses(boxes.bbox60m)];
     case "preset-weather":
       return weatherStationClauses(boxes.bbox);
+    case "preset-restricted":
+      return restrictedAreaClauses(boxes.bbox);
   }
+}
+
+function restrictedAreaClauses(bbox: string): string[] {
+  return [
+    `way["landuse"="military"](${bbox});`,
+    `relation["landuse"="military"](${bbox});`,
+    `way["military"](${bbox});`,
+    `relation["military"](${bbox});`,
+    `node["military"](${bbox});`,
+    `way["boundary"="aboriginal_lands"](${bbox});`,
+    `relation["boundary"="aboriginal_lands"](${bbox});`,
+    `way["boundary"="protected_area"]["access"~"^(no|private|customers|permit)$"](${bbox});`,
+    `relation["boundary"="protected_area"]["access"~"^(no|private|customers|permit)$"](${bbox});`,
+    `way["amenity"="prison"](${bbox});`,
+    `relation["amenity"="prison"](${bbox});`,
+    `way["landuse"="residential"]["gated"="yes"](${bbox});`,
+    `relation["landuse"="residential"]["gated"="yes"](${bbox});`,
+    `way["residential"="gated"](${bbox});`,
+    `relation["residential"="gated"](${bbox});`,
+    `way["landuse"~"^(industrial|government|institutional|commercial)$"]["access"~"^(no|private|customers|permit)$"](${bbox});`,
+    `relation["landuse"~"^(industrial|government|institutional|commercial)$"]["access"~"^(no|private|customers|permit)$"](${bbox});`,
+  ];
 }
 
 function weatherStationClauses(bbox: string): string[] {
