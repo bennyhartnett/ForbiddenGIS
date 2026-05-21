@@ -1595,22 +1595,6 @@ function PresetPanel(props: {
             </small>
           </span>
         </label>
-        <div className="action-row">
-          <button
-            type="button"
-            className="primary-button"
-            onClick={props.onSearch}
-            disabled={props.loading}
-          >
-            {props.loading ? <SpinnerIcon /> : <SearchIcon />}
-            {props.loading
-              ? `Searching... ${formatSeconds(props.elapsedMs)}`
-              : "Search this area"}
-          </button>
-          <button type="button" className="ghost-button" onClick={props.onClear}>
-            Clear
-          </button>
-        </div>
         <ExportRow
           loadedFeatureCount={props.loadedFeatureCount}
           exportBusy={props.exportBusy}
@@ -1626,6 +1610,22 @@ function PresetPanel(props: {
             <dd>{props.renderedFeatureCount.toLocaleString()}</dd>
           </div>
         </dl>
+      </div>
+      <div className="panel-actions">
+        <button
+          type="button"
+          className="primary-button"
+          onClick={props.onSearch}
+          disabled={props.loading}
+        >
+          {props.loading ? <SpinnerIcon /> : <SearchIcon />}
+          {props.loading
+            ? `Searching... ${formatSeconds(props.elapsedMs)}`
+            : "Search this area"}
+        </button>
+        <button type="button" className="ghost-button" onClick={props.onClear}>
+          Clear
+        </button>
       </div>
     </aside>
   );
