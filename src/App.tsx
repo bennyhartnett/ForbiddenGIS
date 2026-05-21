@@ -175,6 +175,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const mapRef = useRef<google.maps.Map | null>(null);
   const mapsRef = useRef<typeof google | null>(null);
   const streetViewServiceRef = useRef<google.maps.StreetViewService | null>(null);
+  const streetViewCoverageRef = useRef<google.maps.StreetViewCoverageLayer | null>(null);
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
   const autocompleteServiceRef = useRef<google.maps.places.AutocompleteService | null>(null);
   const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
@@ -254,6 +255,9 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [streetViewState, setStreetViewState] = useState<StreetViewState>({ status: "idle" });
   const [panoHistory, setPanoHistory] = useState<PanoEntry[]>([]);
   const [panoHistoryIndex, setPanoHistoryIndex] = useState(-1);
+  const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
+  const [resolvingAddress, setResolvingAddress] = useState(false);
+  const addressCacheRef = useRef(new Map<string, string | null>());
   const [resultFeatures, setResultFeatures] = useState<SelectedFeature[]>([]);
   const [matchListOpen, setMatchListOpen] = useState(false);
 
@@ -931,7 +935,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           disableDefaultUI: true,
           zoomControl: false,
           mapTypeControl: false,
-          streetViewControl: false,
+          streetViewControl: true,
+          streetViewControlOptions: {
+            position: maps.maps.ControlPosition.RIGHT_BOTTOM,
+          },
           fullscreenControl: false,
           rotateControl: false,
           scaleControl: true,
@@ -943,6 +950,11 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         mapRef.current = map;
         streetViewServiceRef.current = new maps.maps.StreetViewService();
         geocoderRef.current = new maps.maps.Geocoder();
+        if (maps.maps.StreetViewCoverageLayer) {
+          const coverage = new maps.maps.StreetViewCoverageLayer();
+          coverage.setMap(map);
+          streetViewCoverageRef.current = coverage;
+        }
         map.data.setStyle((feature) =>
           styleForDataFeature(maps, feature, featureColorMapRef.current),
         );
@@ -1062,6 +1074,45 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     },
     [panoHistory],
   );
+
+  useEffect(() => {
+    if (!selectedFeature) {
+      setResolvedAddress(null);
+      setResolvingAddress(false);
+      return;
+    }
+
+    const geocoder = geocoderRef.current;
+    if (!geocoder) {
+      setResolvedAddress(null);
+      return;
+    }
+
+    const { lat, lng } = selectedFeature.coordinate;
+    const cacheKey = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+    const cached = addressCacheRef.current.get(cacheKey);
+    if (cached !== undefined) {
+      setResolvedAddress(cached);
+      setResolvingAddress(false);
+      return;
+    }
+
+    let cancelled = false;
+    setResolvingAddress(true);
+    setResolvedAddress(null);
+    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+      if (cancelled) return;
+      const first = results && results.length > 0 ? results[0].formatted_address : null;
+      const address = status === "OK" && first ? first : null;
+      addressCacheRef.current.set(cacheKey, address);
+      setResolvedAddress(address);
+      setResolvingAddress(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFeature]);
 
   return (
     <div className="app-shell">
@@ -1229,6 +1280,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           <FeatureCard
             selectedFeature={selectedFeature}
             streetViewState={streetViewState}
+            resolvedAddress={resolvedAddress}
+            resolvingAddress={resolvingAddress}
             totalMatches={resultFeatures.length}
             currentIndex={
               resultFeatures.findIndex(
@@ -2236,6 +2289,8 @@ function TimeDock({
 function FeatureCard({
   selectedFeature,
   streetViewState,
+  resolvedAddress,
+  resolvingAddress,
   totalMatches,
   currentIndex,
   onPrev,
@@ -2244,6 +2299,8 @@ function FeatureCard({
 }: {
   selectedFeature: SelectedFeature;
   streetViewState: StreetViewState;
+  resolvedAddress: string | null;
+  resolvingAddress: boolean;
   totalMatches: number;
   currentIndex: number;
   onPrev: () => void;
@@ -2251,7 +2308,13 @@ function FeatureCard({
   onClose: () => void;
 }) {
   const tagRows = summarizeTags(selectedFeature.tags, 10);
-  const address = buildAddressFromTags(selectedFeature.tags);
+  const tagAddress = buildAddressFromTags(selectedFeature.tags);
+  const address = tagAddress ?? resolvedAddress;
+  const hasOsmName = selectedFeature.name !== "Unnamed location";
+  const titleFallback = resolvedAddress?.split(",")[0]?.trim() || null;
+  const displayName = hasOsmName
+    ? selectedFeature.name
+    : titleFallback ?? selectedFeature.name;
   const externalLinks = buildExternalLinks(selectedFeature.coordinate, address);
   const showCycle = totalMatches > 1;
   const positionLabel =
@@ -2267,7 +2330,7 @@ function FeatureCard({
             Selected location
             {positionLabel ? <span className="match-position"> · {positionLabel}</span> : null}
           </p>
-          <h2>{selectedFeature.name}</h2>
+          <h2>{displayName}</h2>
           <small>{formatCoordinate(selectedFeature.coordinate)}</small>
         </div>
         <div className="feature-card-actions">
@@ -2301,6 +2364,11 @@ function FeatureCard({
           <dl className="feature-card-row">
             <dt>Address</dt>
             <dd>{address}</dd>
+          </dl>
+        ) : resolvingAddress ? (
+          <dl className="feature-card-row">
+            <dt>Address</dt>
+            <dd className="muted">Looking up…</dd>
           </dl>
         ) : null}
         <dl className="feature-card-row">

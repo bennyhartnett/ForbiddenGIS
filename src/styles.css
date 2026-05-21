@@ -1518,6 +1518,11 @@ p {
   word-break: break-word;
 }
 
+.feature-card-row dd.muted {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .external-links {
   display: flex;
   flex-wrap: wrap;
