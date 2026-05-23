@@ -122,6 +122,57 @@ const RENDER_LIMIT = 5000;
 const DEFAULT_CENTER: LatLng = { lat: 38.9072, lng: -77.0369 };
 const DEFAULT_ZOOM = 15;
 const DEFAULT_LOCATION_QUERY = "Washington, DC";
+const LAST_MAP_VIEW_STORAGE_KEY = "forbiddenGIS.lastMapView";
+
+interface CachedMapView {
+  center: LatLng;
+  zoom: number;
+  mapType?: MapDisplayType;
+}
+
+function loadCachedMapView(): CachedMapView | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(LAST_MAP_VIEW_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CachedMapView> | null;
+    if (
+      !parsed ||
+      typeof parsed.zoom !== "number" ||
+      !Number.isFinite(parsed.zoom) ||
+      !parsed.center ||
+      typeof parsed.center.lat !== "number" ||
+      typeof parsed.center.lng !== "number" ||
+      !Number.isFinite(parsed.center.lat) ||
+      !Number.isFinite(parsed.center.lng)
+    ) {
+      return null;
+    }
+    const mapType =
+      parsed.mapType === "roadmap" ||
+      parsed.mapType === "satellite" ||
+      parsed.mapType === "hybrid" ||
+      parsed.mapType === "terrain"
+        ? parsed.mapType
+        : undefined;
+    return {
+      center: { lat: parsed.center.lat, lng: parsed.center.lng },
+      zoom: parsed.zoom,
+      mapType,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedMapView(view: CachedMapView): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(LAST_MAP_VIEW_STORAGE_KEY, JSON.stringify(view));
+  } catch {
+    // Storage may be full or disabled; ignore silently.
+  }
+}
 const DEFAULT_RAW_QUERY = `[out:json][timeout:25];
 (
   node["amenity"="restaurant"]({{bbox}});
@@ -202,8 +253,13 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [geolocating, setGeolocating] = useState(false);
 
   // Map view state
-  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
-  const [mapType, setMapType] = useState<MapDisplayType>("roadmap");
+  const cachedMapViewRef = useRef<CachedMapView | null>(loadCachedMapView());
+  const [zoom, setZoom] = useState(
+    () => cachedMapViewRef.current?.zoom ?? DEFAULT_ZOOM,
+  );
+  const [mapType, setMapType] = useState<MapDisplayType>(
+    () => cachedMapViewRef.current?.mapType ?? "roadmap",
+  );
   const [mapTheme, setMapTheme] = useState<ThemeId>("default");
   const [tiltOn, setTiltOn] = useState(false);
   const [overlayId, setOverlayId] = useState<OverlayId>("none");
@@ -1067,10 +1123,11 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         if (cancelled || !mapDivRef.current || mapRef.current) return;
 
         mapsRef.current = maps;
+        const cachedView = cachedMapViewRef.current;
         const map = new maps.maps.Map(mapDivRef.current, {
-          center: DEFAULT_CENTER,
-          zoom: DEFAULT_ZOOM,
-          mapTypeId: "roadmap",
+          center: cachedView?.center ?? DEFAULT_CENTER,
+          zoom: cachedView?.zoom ?? DEFAULT_ZOOM,
+          mapTypeId: cachedView?.mapType ?? "roadmap",
           disableDefaultUI: true,
           zoomControl: false,
           mapTypeControl: false,
@@ -1141,16 +1198,28 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           setShowSearchHereChip(movedKm > 0.25 || zoomedDelta >= 1);
         };
 
+        const persistCurrentMapView = () => {
+          const center = map.getCenter();
+          if (!center) return;
+          saveCachedMapView({
+            center: { lat: center.lat(), lng: center.lng() },
+            zoom: map.getZoom() ?? DEFAULT_ZOOM,
+            mapType: normalizeMapTypeId(map.getMapTypeId()),
+          });
+        };
+
         listeners.push(
           map.data.addListener("click", (event: google.maps.Data.MouseEvent) => {
             dataFeatureClickRef.current(event.feature);
           }),
           map.addListener("maptypeid_changed", () => {
             setMapType(normalizeMapTypeId(map.getMapTypeId()));
+            persistCurrentMapView();
           }),
           map.addListener("idle", () => {
             syncCurrentMapState();
             maybeShowSearchHereChip();
+            persistCurrentMapView();
           }),
           map.addListener("bounds_changed", syncCurrentMapState),
         );
