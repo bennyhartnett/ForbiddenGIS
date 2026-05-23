@@ -1852,12 +1852,12 @@ function PresetPanel(props: {
   onAccumulateChange: (value: boolean) => void;
 }) {
   return (
-    <aside className={`panel preset-panel ${props.open ? "" : "collapsed"}`} aria-label="Scout queries">
+    <aside className={`panel preset-panel ${props.open ? "" : "collapsed"}`} aria-label="I'm Looking For">
       <div className="panel-header">
         <span className="panel-icon" aria-hidden="true">
           <CompassIcon />
         </span>
-        <h2>Scout queries</h2>
+        <h2>I'm Looking For</h2>
         <button
           type="button"
           className="panel-toggle"
