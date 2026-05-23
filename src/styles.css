@@ -1219,7 +1219,8 @@ p {
   bottom: 24px;
   z-index: 4;
   display: grid;
-  gap: 8px;
+  gap: 10px;
+  justify-items: end;
 }
 
 /* ---- Map legend (bottom-left) ---- */
@@ -1326,7 +1327,7 @@ p {
   display: grid;
   gap: 1px;
   background: var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   box-shadow: var(--shadow-1);
   overflow: hidden;
 }
@@ -1340,13 +1341,16 @@ p {
   background: var(--surface);
   border: none;
   padding: 0;
+  color: var(--ink-soft);
+  transition: background 120ms ease, color 120ms ease;
 }
 
 .icon-stack button:hover {
   background: var(--hover);
+  color: var(--ink);
 }
 
-.icon-stack button[aria-pressed="true"] {
+.icon-stack button[aria-pressed="true"]:not(.pegman-button) {
   background: var(--primary-soft);
   color: var(--primary-ink);
 }
@@ -1361,10 +1365,58 @@ p {
   stroke-linejoin: round;
 }
 
-.map-controls .icon-stack:first-child button:first-child svg path,
-.map-controls .icon-stack:first-child button:first-child svg circle {
-  fill: currentColor;
-  stroke: currentColor;
+/* ---- Pegman button (Google Maps yellow figure) ---- */
+
+.pegman-button {
+  position: relative;
+}
+
+.pegman-button .pegman-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.pegman-button .pegman-icon .pegman-head,
+.pegman-button .pegman-icon .pegman-body {
+  fill: #f9ab00;
+  stroke: #b06000;
+  stroke-width: 0.7;
+  stroke-linejoin: round;
+}
+
+.pegman-button:hover .pegman-icon .pegman-head,
+.pegman-button:hover .pegman-icon .pegman-body {
+  fill: #fbbc04;
+}
+
+.icon-stack .pegman-button.is-active,
+.icon-stack .pegman-button[aria-pressed="true"] {
+  background: #fef7e0;
+  box-shadow: inset 0 0 0 2px #f9ab00;
+}
+
+.icon-stack .pegman-button.is-active .pegman-icon .pegman-head,
+.icon-stack .pegman-button.is-active .pegman-icon .pegman-body {
+  fill: #f9ab00;
+  stroke: #8a4f00;
+}
+
+.icon-stack .pegman-button.is-active::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: pegman-pulse 1.6s ease-out infinite;
+}
+
+@keyframes pegman-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(249, 171, 0, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 6px rgba(249, 171, 0, 0);
+  }
 }
 
 /* ---- Time slider (bottom dock) ---- */
@@ -1965,18 +2017,79 @@ p {
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 12px 14px 12px 16px;
   border-bottom: 1px solid var(--line);
+}
+
+.street-view-header-title {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
 }
 
 .street-view-header h2 {
   font-size: 1.02rem;
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .street-view-header small {
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+.street-view-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #fef7e0;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.street-view-badge .pegman-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.street-view-badge .pegman-icon .pegman-head,
+.street-view-badge .pegman-icon .pegman-body {
+  fill: #f9ab00;
+  stroke: #8a4f00;
+  stroke-width: 0.7;
+  stroke-linejoin: round;
+}
+
+.street-view-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+}
+
+.street-view-close:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.street-view-close svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .street-view-canvas {
@@ -2066,68 +2179,131 @@ p {
 /* ---- Mobile ---- */
 
 @media (max-width: 820px) {
+  :root {
+    /* Match Google Maps mobile sizing */
+    --mobile-edge: 10px;
+    --mobile-edge-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
   .preset-panel,
   .layers-panel {
     top: auto;
-    bottom: 16px;
-    left: 8px;
-    right: 8px;
+    bottom: var(--mobile-edge-bottom);
+    left: var(--mobile-edge);
+    right: var(--mobile-edge);
     width: auto;
     max-width: none;
-  }
-
-  .preset-panel {
-    bottom: 16px;
-    max-height: 60vh;
-  }
-
-  .layers-panel {
-    bottom: 16px;
-    max-height: 60vh;
+    max-height: 62vh;
+    border-radius: 14px;
   }
 
   .feature-card {
-    left: 8px;
-    right: 8px;
+    left: var(--mobile-edge);
+    right: var(--mobile-edge);
     width: auto;
-    bottom: 16px;
+    bottom: var(--mobile-edge-bottom);
+    border-radius: 14px;
   }
 
   .search-pill {
-    left: 8px;
-    right: 8px;
+    left: var(--mobile-edge);
+    right: var(--mobile-edge);
+    top: max(12px, env(safe-area-inset-top));
     width: auto;
   }
 
   .map-controls {
-    right: 8px;
-    bottom: 16px;
+    right: var(--mobile-edge);
+    bottom: calc(var(--mobile-edge-bottom) + 4px);
+    gap: 10px;
+  }
+
+  .icon-stack button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .icon-stack button svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .pegman-button .pegman-icon {
+    width: 24px;
+    height: 24px;
   }
 
   .match-browse-chip {
-    right: 8px;
-    bottom: 180px;
+    right: var(--mobile-edge);
+    bottom: calc(var(--mobile-edge-bottom) + 200px);
+    height: 44px;
   }
 
   .match-list-panel {
-    right: 8px;
-    left: 8px;
+    right: var(--mobile-edge);
+    left: var(--mobile-edge);
     width: auto;
     top: auto;
-    bottom: 16px;
-    max-height: 60vh;
+    bottom: var(--mobile-edge-bottom);
+    max-height: 62vh;
+    border-radius: 14px;
   }
 
   .street-view-panel {
     width: 100%;
-    height: 60vh;
+    height: 65vh;
     inset: auto 0 0 0;
+    border-top-left-radius: 16px;
+    border-top-right-radius: 16px;
+    overflow: hidden;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .street-view-panel::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    background: var(--line-strong);
+    border-radius: 999px;
+    margin: 6px auto 2px;
   }
 
   .time-dock {
-    left: 8px;
-    right: 8px;
+    left: var(--mobile-edge);
+    right: var(--mobile-edge);
+    bottom: var(--mobile-edge-bottom);
     width: auto;
     transform: none;
   }
+
+  .toast-stack {
+    top: calc(max(12px, env(safe-area-inset-top)) + 60px);
+    width: calc(100vw - 2 * var(--mobile-edge));
+  }
+
+  .search-pill .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .primary-button,
+  .ghost-button {
+    height: 44px;
+  }
+
+  .chip {
+    height: 36px;
+  }
+}
+
+/* ---- Touch-friendly: prevent double-tap zoom on controls ---- */
+
+button,
+a,
+input,
+select,
+textarea,
+[role="button"] {
+  touch-action: manipulation;
 }

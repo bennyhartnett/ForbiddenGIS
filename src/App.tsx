@@ -265,6 +265,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const addressCacheRef = useRef(new Map<string, string | null>());
   const [resultFeatures, setResultFeatures] = useState<SelectedFeature[]>([]);
   const [matchListOpen, setMatchListOpen] = useState(false);
+  const [pegmanMode, setPegmanMode] = useState(false);
+  const pegmanMapClickListenerRef = useRef<google.maps.MapsEventListener | null>(null);
 
   const selectedPreset = useMemo(() => getPresetById(presetId), [presetId]);
   const activeWarning = searchWarning ?? boundsWarning;
@@ -827,16 +829,42 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     [effectiveFeatureColors],
   );
 
-  const openMapCenterStreetView = useCallback(() => {
+  const deactivatePegmanMode = useCallback(() => {
+    pegmanMapClickListenerRef.current?.remove();
+    pegmanMapClickListenerRef.current = null;
+    streetViewCoverageRef.current?.setMap(null);
     const map = mapRef.current;
-    const center = map?.getCenter();
-    if (!center) {
-      setError("The map center is not available yet.");
+    if (map) {
+      map.setOptions({ draggableCursor: null });
+    }
+    setPegmanMode(false);
+  }, []);
+
+  const togglePegmanMode = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) {
+      setError("The map is not ready yet.");
+      return;
+    }
+    if (pegmanMode) {
+      deactivatePegmanMode();
       return;
     }
     setError(null);
-    void runStreetViewLookup({ lat: center.lat(), lng: center.lng() }, "Map center");
-  }, [runStreetViewLookup]);
+    streetViewCoverageRef.current?.setMap(map);
+    map.setOptions({ draggableCursor: "crosshair" });
+    pegmanMapClickListenerRef.current?.remove();
+    pegmanMapClickListenerRef.current = map.addListener(
+      "click",
+      (event: google.maps.MapMouseEvent) => {
+        if (!event.latLng) return;
+        const coordinate = { lat: event.latLng.lat(), lng: event.latLng.lng() };
+        deactivatePegmanMode();
+        void runStreetViewLookup(coordinate, "Selected point");
+      },
+    );
+    setPegmanMode(true);
+  }, [deactivatePegmanMode, pegmanMode, runStreetViewLookup]);
 
   const scopeToLocation = useCallback(
     (queryOverride?: string, placeId?: string) => {
@@ -940,10 +968,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           disableDefaultUI: true,
           zoomControl: false,
           mapTypeControl: false,
-          streetViewControl: true,
-          streetViewControlOptions: {
-            position: maps.maps.ControlPosition.RIGHT_BOTTOM,
-          },
+          streetViewControl: false,
           fullscreenControl: false,
           rotateControl: false,
           scaleControl: true,
@@ -956,9 +981,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         streetViewServiceRef.current = new maps.maps.StreetViewService();
         geocoderRef.current = new maps.maps.Geocoder();
         if (maps.maps.StreetViewCoverageLayer) {
-          const coverage = new maps.maps.StreetViewCoverageLayer();
-          coverage.setMap(map);
-          streetViewCoverageRef.current = coverage;
+          streetViewCoverageRef.current = new maps.maps.StreetViewCoverageLayer();
         }
         map.data.setStyle((feature) =>
           styleForDataFeature(maps, feature, featureColorMapRef.current),
@@ -1228,12 +1251,13 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
         <MapControls
           tiltOn={tiltOn}
+          pegmanActive={pegmanMode}
           onZoomIn={() => zoomMap(1)}
           onZoomOut={() => zoomMap(-1)}
           onToggleTilt={() => setTiltOn((v) => !v)}
           onResetCamera={resetMapCamera}
           onFullscreen={enterMapFullscreen}
-          onStreetView={openMapCenterStreetView}
+          onStreetView={togglePegmanMode}
         />
 
         <MapLegend
@@ -1307,12 +1331,23 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         {streetViewState.status === "open" ? (
           <section className="street-view-panel" aria-label="Street view">
             <div className="street-view-header">
-              <div>
-                <p className="eyebrow">Street view</p>
-                <h2>{streetViewState.sourceName}</h2>
+              <div className="street-view-header-title">
+                <span className="street-view-badge" aria-hidden="true">
+                  <PegmanIcon />
+                </span>
+                <div>
+                  <p className="eyebrow">Street view</p>
+                  <h2>{streetViewState.sourceName}</h2>
+                </div>
               </div>
-              <button type="button" className="ghost-button" onClick={closeStreetView}>
-                Close
+              <button
+                type="button"
+                className="icon-button street-view-close"
+                onClick={closeStreetView}
+                aria-label="Close street view"
+                title="Close"
+              >
+                <CloseIcon />
               </button>
             </div>
             <StreetViewTimeSlider
@@ -2079,6 +2114,7 @@ function LayersPanel(props: {
 
 function MapControls(props: {
   tiltOn: boolean;
+  pegmanActive: boolean;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onToggleTilt: () => void;
@@ -2089,7 +2125,22 @@ function MapControls(props: {
   return (
     <nav className="map-controls" aria-label="Map controls">
       <div className="icon-stack">
-        <button type="button" onClick={props.onStreetView} aria-label="Open street view at map center" title="Street view">
+        <button
+          type="button"
+          className={`pegman-button${props.pegmanActive ? " is-active" : ""}`}
+          onClick={props.onStreetView}
+          aria-label={
+            props.pegmanActive
+              ? "Cancel street view selection"
+              : "Drop pegman to open street view"
+          }
+          aria-pressed={props.pegmanActive}
+          title={
+            props.pegmanActive
+              ? "Click on the map or press again to cancel"
+              : "Street view"
+          }
+        >
           <PegmanIcon />
         </button>
       </div>
@@ -2643,10 +2694,12 @@ function LayersIcon() {
 
 function PegmanIcon() {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="5" r="2.3" />
-      <path d="M9.4 10.1h5.2l.9 8.5a1.5 1.5 0 0 1-1.5 1.7h-4a1.5 1.5 0 0 1-1.5-1.7z" />
-      <path d="M7 11.2c1.4-.9 3.1-1.4 5-1.4s3.6.5 5 1.4" />
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="pegman-icon">
+      <circle cx="12" cy="4.8" r="2.6" className="pegman-head" />
+      <path
+        className="pegman-body"
+        d="M12 8.2c-2.9 0-5.6.95-7.05 1.85-.5.31-.66.95-.35 1.45.3.5.94.66 1.44.36.8-.49 2-1.05 3.36-1.4l-.5 8.6A1.4 1.4 0 0 0 10.3 20.5h.95l.25-7.1h1l.25 7.1h.95a1.4 1.4 0 0 0 1.4-1.44l-.5-8.6c1.36.35 2.56.91 3.36 1.4.5.3 1.14.14 1.44-.36.31-.5.15-1.14-.35-1.45C17.6 9.15 14.9 8.2 12 8.2z"
+      />
     </svg>
   );
 }
