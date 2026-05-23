@@ -92,55 +92,71 @@ type StreetViewState =
 interface PresetCategory {
   id: string;
   label: string;
-  match: (preset: PresetDefinition) => boolean;
+  presetIds: ReadonlySet<PresetId>;
 }
 
 const PRESET_CATEGORIES: PresetCategory[] = [
-  { id: "all", label: "All", match: () => true },
   {
-    id: "off-road",
-    label: "Off-road",
-    match: (preset) => /off-road|rough|unpaved|high-clearance|dirt|gravel/i.test(preset.name),
+    id: "public-off-road",
+    label: "Public Off Road",
+    presetIds: new Set<PresetId>([
+      "preset-01",
+      "preset-dirt-roads",
+      "preset-15",
+      "preset-16",
+    ]),
   },
   {
-    id: "parking",
-    label: "Parking",
-    match: (preset) => /parking|pull-off|layby/i.test(preset.name),
+    id: "fishing-spots",
+    label: "Fishing Spots",
+    presetIds: new Set<PresetId>([
+      "preset-05",
+      "preset-08",
+      "preset-17",
+      "preset-21",
+      "preset-24",
+      "preset-27",
+      "preset-28",
+    ]),
   },
   {
-    id: "water",
-    label: "Water",
-    match: (preset) => /water|ford|bridge|waterside/i.test(preset.name),
+    id: "camping-spots",
+    label: "Camping Spots",
+    presetIds: new Set<PresetId>([
+      "preset-04",
+      "preset-07",
+      "preset-15",
+      "preset-18",
+      "preset-19",
+      "preset-22",
+    ]),
   },
   {
-    id: "dead-end",
-    label: "Dead ends",
-    match: (preset) => /dead.?end|cul.de.sac|cut-through/i.test(preset.name),
+    id: "hunting-spots",
+    label: "Hunting Spots",
+    presetIds: new Set<PresetId>([
+      "preset-07",
+      "preset-15",
+      "preset-18",
+      "preset-22",
+      "preset-26",
+      "preset-29",
+      "preset-32",
+    ]),
   },
   {
-    id: "quiet",
-    label: "Quiet roads",
-    match: (preset) => /25\s?mph|low-speed|unlit|sidewalk|tree-lined|quiet/i.test(preset.name),
-  },
-  {
-    id: "trails",
-    label: "Trails",
-    match: (preset) => /trail|walking|pedestrian|cut-through|path/i.test(preset.name),
-  },
-  {
-    id: "barriers",
-    label: "Barriers",
-    match: (preset) => /barrier|gate|fence|train track/i.test(preset.name),
-  },
-  {
-    id: "weather",
-    label: "Weather",
-    match: (preset) => /weather/i.test(preset.name),
-  },
-  {
-    id: "restricted",
-    label: "Restricted",
-    match: (preset) => /restricted|private/i.test(preset.name),
+    id: "public-parking",
+    label: "Public Parking",
+    presetIds: new Set<PresetId>([
+      "preset-04",
+      "preset-09",
+      "preset-10",
+      "preset-19",
+      "preset-20",
+      "preset-21",
+      "preset-22",
+      "preset-26",
+    ]),
   },
 ];
 
@@ -225,7 +241,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [rawQuery, setRawQuery] = useState(DEFAULT_RAW_QUERY);
   const [presetId, setPresetId] = useState<PresetId>("preset-dirt-roads");
   const [presetSearch, setPresetSearch] = useState("");
-  const [presetCategory, setPresetCategory] = useState<string>("all");
+  const [presetCategory, setPresetCategory] = useState<string>(PRESET_CATEGORIES[0].id);
   const [showBuildings, setShowBuildings] = useState(false);
   const [showWater, setShowWater] = useState(true);
   const [bufferScale, setBufferScale] = useState(1);
@@ -257,7 +273,6 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   // Panel UI state
   const [presetPanelOpen, setPresetPanelOpen] = useState(true);
   const [layersPanelOpen, setLayersPanelOpen] = useState(false);
-  const [accumulateResults, setAccumulateResults] = useState(false);
   const [loadedFeatureCount, setLoadedFeatureCount] = useState(0);
   const [exportBusy, setExportBusy] = useState(false);
 
@@ -301,7 +316,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     const category = PRESET_CATEGORIES.find((c) => c.id === presetCategory) ?? PRESET_CATEGORIES[0];
     const query = presetSearch.trim().toLowerCase();
     return PRESETS.filter((preset) => {
-      if (!category.match(preset)) return false;
+      if (!category.presetIds.has(preset.id)) return false;
       if (!query) return true;
       return (
         preset.name.toLowerCase().includes(query) ||
@@ -778,15 +793,14 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         type: "FeatureCollection",
         features: result.features,
       };
-      const finalCollection = accumulateResults
-        ? mergeFeatureCollections(loadedFeaturesRef.current, newCollection)
-        : newCollection;
+      const finalCollection = mergeFeatureCollections(
+        loadedFeaturesRef.current,
+        newCollection,
+      );
 
       renderFeatures(finalCollection);
       setRawFeatureCount(overpass.rawFeatureCount);
-      setResultCount(
-        accumulateResults ? finalCollection.features.length : result.resultCount,
-      );
+      setResultCount(finalCollection.features.length);
       setRenderedFeatureCount(finalCollection.features.length);
       setSearchWarning(result.warnings[0] ?? null);
       const startedAt = searchStartedAtRef.current;
@@ -814,7 +828,6 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       }
     }
   }, [
-    accumulateResults,
     bufferScale,
     closeStreetView,
     loading,
@@ -1462,8 +1475,6 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           elapsedMs={elapsedMs}
           lastSearchDurationMs={lastSearchDurationMs}
           searchOutcome={searchOutcome}
-          accumulate={accumulateResults}
-          onAccumulateChange={setAccumulateResults}
         />
 
         <FloatingExport
@@ -1848,8 +1859,6 @@ function PresetPanel(props: {
   elapsedMs: number;
   lastSearchDurationMs: number | null;
   searchOutcome: "idle" | "success" | "error";
-  accumulate: boolean;
-  onAccumulateChange: (value: boolean) => void;
 }) {
   return (
     <aside className={`panel preset-panel ${props.open ? "" : "collapsed"}`} aria-label="Scout queries">
@@ -1945,17 +1954,6 @@ function PresetPanel(props: {
         </dl>
       </div>
       <div className="panel-actions">
-        <label className="accumulate-inline" title="Append new searches to existing results">
-          <span className="toggle-switch">
-            <input
-              type="checkbox"
-              checked={props.accumulate}
-              onChange={(event) => props.onAccumulateChange(event.target.checked)}
-            />
-            <span className="slider" />
-          </span>
-          <span>Add to map</span>
-        </label>
         <button
           type="button"
           className="primary-button"
