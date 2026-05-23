@@ -332,6 +332,74 @@ p {
   cursor: progress;
 }
 
+/* ---- Floating export bar (top center) ---- */
+
+.floating-export {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  max-width: calc(100vw - 32px);
+}
+
+.floating-export-count {
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.floating-export-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--line);
+}
+
+.floating-export-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-weight: 500;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.floating-export-button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.floating-export-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.floating-export-button svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* ---- Panel base ---- */
 
 .panel {
@@ -360,13 +428,29 @@ p {
   bottom: 0;
   z-index: 2;
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr auto;
   gap: 8px;
   align-items: center;
   padding: 10px 14px 14px;
   background: var(--surface);
   border-top: 1px solid var(--line);
   box-shadow: 0 -8px 16px -12px rgba(15, 23, 42, 0.25);
+}
+
+.accumulate-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  height: 40px;
 }
 
 .panel-header {
@@ -2302,6 +2386,10 @@ body.street-view-resizing .street-view-canvas {
     right: var(--mobile-edge);
     bottom: calc(var(--mobile-edge-bottom) + 200px);
     height: 44px;
+  }
+
+  .floating-export {
+    top: calc(max(12px, env(safe-area-inset-top)) + 64px);
   }
 
   .match-list-panel {

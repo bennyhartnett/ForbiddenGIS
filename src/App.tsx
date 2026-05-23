@@ -1447,8 +1447,6 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         <PresetPanel
           open={presetPanelOpen}
           onToggle={() => setPresetPanelOpen((v) => !v)}
-          mode={mode}
-          onModeChange={setMode}
           presetId={presetId}
           onPresetChange={setPresetId}
           presetSearch={presetSearch}
@@ -1456,29 +1454,19 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           presetCategory={presetCategory}
           onPresetCategoryChange={setPresetCategory}
           filteredPresets={filteredPresets}
-          selectedPreset={selectedPreset}
-          showBuildings={showBuildings}
-          onShowBuildingsChange={setShowBuildings}
-          showWater={showWater}
-          onShowWaterChange={setShowWater}
-          bufferScale={bufferScale}
-          onBufferScaleChange={setBufferScale}
-          tagFilter={tagFilter}
-          onTagFilterChange={setTagFilter}
-          rawQuery={rawQuery}
-          onRawQueryChange={setRawQuery}
           loading={loading}
-          difficulty={difficultyEstimate}
           onSearch={() => void handleSearch()}
           onClear={clearResults}
           resultCount={resultCount}
           renderedFeatureCount={renderedFeatureCount}
-          rawFeatureCount={rawFeatureCount}
           elapsedMs={elapsedMs}
           lastSearchDurationMs={lastSearchDurationMs}
           searchOutcome={searchOutcome}
           accumulate={accumulateResults}
           onAccumulateChange={setAccumulateResults}
+        />
+
+        <FloatingExport
           loadedFeatureCount={loadedFeatureCount}
           exportBusy={exportBusy}
           onExport={(format) => void handleExport(format)}
@@ -1808,8 +1796,6 @@ function SearchPill({
 function PresetPanel(props: {
   open: boolean;
   onToggle: () => void;
-  mode: Mode;
-  onModeChange: (mode: Mode) => void;
   presetId: PresetId;
   onPresetChange: (id: PresetId) => void;
   presetSearch: string;
@@ -1817,32 +1803,16 @@ function PresetPanel(props: {
   presetCategory: string;
   onPresetCategoryChange: (id: string) => void;
   filteredPresets: PresetDefinition[];
-  selectedPreset: PresetDefinition;
-  showBuildings: boolean;
-  onShowBuildingsChange: (value: boolean) => void;
-  showWater: boolean;
-  onShowWaterChange: (value: boolean) => void;
-  bufferScale: number;
-  onBufferScaleChange: (value: number) => void;
-  tagFilter: string;
-  onTagFilterChange: (value: string) => void;
-  rawQuery: string;
-  onRawQueryChange: (value: string) => void;
   loading: boolean;
-  difficulty: DifficultyEstimate;
   onSearch: () => void;
   onClear: () => void;
   resultCount: number;
   renderedFeatureCount: number;
-  rawFeatureCount: number | null;
   elapsedMs: number;
   lastSearchDurationMs: number | null;
   searchOutcome: "idle" | "success" | "error";
   accumulate: boolean;
   onAccumulateChange: (value: boolean) => void;
-  loadedFeatureCount: number;
-  exportBusy: boolean;
-  onExport: (format: ExportFormat) => void;
 }) {
   return (
     <aside className={`panel preset-panel ${props.open ? "" : "collapsed"}`} aria-label="Scout queries">
@@ -1900,7 +1870,6 @@ function PresetPanel(props: {
                   className="preset-card"
                   aria-pressed={preset.id === props.presetId}
                   onClick={() => {
-                    props.onModeChange("preset");
                     props.onPresetChange(preset.id);
                   }}
                 >
@@ -1917,142 +1886,6 @@ function PresetPanel(props: {
           </div>
         </div>
 
-        {props.mode === "preset" ? (
-          <div className="panel-section">
-            <p className="panel-section-title">Parameters · {props.selectedPreset.name}</p>
-            <div className="preset-tuner">
-              <div className="tuner-row">
-                <label>
-                  Buffer radius
-                  <strong>{props.bufferScale.toFixed(2)}×</strong>
-                </label>
-                <input
-                  type="range"
-                  min={0.5}
-                  max={2}
-                  step={0.25}
-                  value={props.bufferScale}
-                  onChange={(event) =>
-                    props.onBufferScaleChange(Number(event.target.value))
-                  }
-                  aria-label="Buffer radius multiplier"
-                />
-              </div>
-              <label className="toggle-row">
-                <span>
-                  Context buildings
-                  <small>Render mapped buildings within the buffer</small>
-                </span>
-                <span className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={props.showBuildings}
-                    disabled={!props.selectedPreset.supportsBuildings}
-                    onChange={(event) => props.onShowBuildingsChange(event.target.checked)}
-                  />
-                  <span className="slider" />
-                </span>
-              </label>
-              <label className="toggle-row">
-                <span>
-                  Context water
-                  <small>Show nearby water features</small>
-                </span>
-                <span className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={props.showWater}
-                    disabled={!props.selectedPreset.supportsWater}
-                    onChange={(event) => props.onShowWaterChange(event.target.checked)}
-                  />
-                  <span className="slider" />
-                </span>
-              </label>
-            </div>
-          </div>
-        ) : null}
-
-        <details className="advanced-disclosure" open={props.mode !== "preset"}>
-          <summary>
-            <ChevronRightIcon />
-            Advanced search
-          </summary>
-          <div className="advanced-body">
-            <div className="segmented" role="tablist" aria-label="Search mode">
-              <button
-                type="button"
-                role="tab"
-                aria-pressed={props.mode === "preset"}
-                onClick={() => props.onModeChange("preset")}
-              >
-                Premade
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-pressed={props.mode === "simple"}
-                onClick={() => props.onModeChange("simple")}
-              >
-                Simple tag
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-pressed={props.mode === "raw"}
-                onClick={() => props.onModeChange("raw")}
-              >
-                Custom
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-pressed={false}
-                onClick={() => props.onClear()}
-                title="Clear results"
-              >
-                Reset
-              </button>
-            </div>
-
-            {props.mode === "simple" ? (
-              <div className="tuner-row">
-                <label htmlFor="tag-filter">Tag filter</label>
-                <input
-                  id="tag-filter"
-                  value={props.tagFilter}
-                  onChange={(event) => props.onTagFilterChange(event.target.value)}
-                  placeholder="amenity=restaurant"
-                  spellCheck={false}
-                />
-                <div className="simple-preset-grid">
-                  {SIMPLE_PRESETS.map((preset) => (
-                    <button
-                      key={preset.filter}
-                      type="button"
-                      onClick={() => props.onTagFilterChange(preset.filter)}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {props.mode === "raw" ? (
-              <div className="tuner-row">
-                <label htmlFor="raw-query">Custom query</label>
-                <textarea
-                  id="raw-query"
-                  className="raw-query-input"
-                  value={props.rawQuery}
-                  onChange={(event) => props.onRawQueryChange(event.target.value)}
-                  spellCheck={false}
-                  rows={10}
-                />
-              </div>
-            ) : null}
-          </div>
-        </details>
       </div>
 
       <div className="panel-footer">
@@ -2062,35 +1895,6 @@ function PresetPanel(props: {
           lastSearchDurationMs={props.lastSearchDurationMs}
           searchOutcome={props.searchOutcome}
           resultCount={props.resultCount}
-        />
-        <div className="difficulty-line">
-          <span>{props.difficulty.scope}</span>
-          <span className={`difficulty-badge difficulty-${props.difficulty.level}`}>
-            {props.difficulty.label}
-          </span>
-        </div>
-        <label className="accumulate-row">
-          <span className="toggle-switch">
-            <input
-              type="checkbox"
-              checked={props.accumulate}
-              onChange={(event) => props.onAccumulateChange(event.target.checked)}
-            />
-            <span className="slider" />
-          </span>
-          <span>
-            Add to map
-            <small>
-              {props.accumulate
-                ? "New searches append to existing results (deduped by OSM id)."
-                : "New searches replace existing results."}
-            </small>
-          </span>
-        </label>
-        <ExportRow
-          loadedFeatureCount={props.loadedFeatureCount}
-          exportBusy={props.exportBusy}
-          onExport={props.onExport}
         />
         <dl className="stats-strip">
           <div>
@@ -2104,6 +1908,17 @@ function PresetPanel(props: {
         </dl>
       </div>
       <div className="panel-actions">
+        <label className="accumulate-inline" title="Append new searches to existing results">
+          <span className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={props.accumulate}
+              onChange={(event) => props.onAccumulateChange(event.target.checked)}
+            />
+            <span className="slider" />
+          </span>
+          <span>Add to map</span>
+        </label>
         <button
           type="button"
           className="primary-button"
@@ -2123,41 +1938,37 @@ function PresetPanel(props: {
   );
 }
 
-function ExportRow(props: {
+function FloatingExport(props: {
   loadedFeatureCount: number;
   exportBusy: boolean;
   onExport: (format: ExportFormat) => void;
 }) {
-  const disabled = props.exportBusy || props.loadedFeatureCount === 0;
+  if (props.loadedFeatureCount === 0) return null;
   const formats: { id: ExportFormat; label: string; title: string }[] = [
     { id: "geojson", label: "GeoJSON", title: "Download as GeoJSON (.geojson)" },
     { id: "kml", label: "KML", title: "Download as KML (.kml) for Google Earth, QGIS, etc." },
     { id: "kmz", label: "KMZ", title: "Download as compressed KMZ (.kmz)" },
   ];
   return (
-    <div className="export-row" role="group" aria-label="Export loaded features">
-      <div className="export-row-head">
-        <span className="export-row-title">Export</span>
-        <span className="export-row-count">
-          {props.loadedFeatureCount.toLocaleString()} loaded
-        </span>
-      </div>
-      <div className="export-row-buttons">
-        {formats.map((format) => (
-          <button
-            key={format.id}
-            type="button"
-            className="ghost-button export-button"
-            onClick={() => props.onExport(format.id)}
-            disabled={disabled}
-            title={format.title}
-            aria-label={format.title}
-          >
-            {props.exportBusy ? <SpinnerIcon /> : <DownloadIcon />}
-            {format.label}
-          </button>
-        ))}
-      </div>
+    <div className="floating-export" role="group" aria-label="Export loaded features">
+      <span className="floating-export-count">
+        {props.loadedFeatureCount.toLocaleString()} loaded
+      </span>
+      <span className="floating-export-divider" aria-hidden="true" />
+      {formats.map((format) => (
+        <button
+          key={format.id}
+          type="button"
+          className="floating-export-button"
+          onClick={() => props.onExport(format.id)}
+          disabled={props.exportBusy}
+          title={format.title}
+          aria-label={format.title}
+        >
+          {props.exportBusy ? <SpinnerIcon /> : <DownloadIcon />}
+          {format.label}
+        </button>
+      ))}
     </div>
   );
 }
