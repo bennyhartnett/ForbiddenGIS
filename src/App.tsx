@@ -1544,6 +1544,11 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
             onClose={() => setMatchListOpen(false)}
             onPrev={() => cycleMatch(-1)}
             onNext={() => cycleMatch(1)}
+            rightOffset={
+              streetViewState.status === "open" && streetViewWidth !== null
+                ? streetViewWidth + 16
+                : 16
+            }
           />
         ) : null}
 
@@ -1570,59 +1575,91 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           />
         ) : null}
 
-        {streetViewState.status === "open" ? (
-          <section
-            className="street-view-panel"
-            aria-label="Street view"
-            style={
-              streetViewWidth !== null ? { width: `${streetViewWidth}px` } : undefined
-            }
-          >
-            <div
-              className="street-view-resize-handle"
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize street view panel"
-              tabIndex={0}
-              onPointerDown={handleStreetViewResizePointerDown}
-              onPointerMove={handleStreetViewResizePointerMove}
-              onPointerUp={endStreetViewResize}
-              onPointerCancel={endStreetViewResize}
-              onDoubleClick={handleStreetViewResizeDoubleClick}
-              onKeyDown={handleStreetViewResizeKeyDown}
-              title="Drag to resize · double-click to reset"
-            >
-              <span className="street-view-resize-grip" aria-hidden="true" />
-            </div>
-            <div className="street-view-header">
-              <div className="street-view-header-title">
-                <span className="street-view-badge" aria-hidden="true">
-                  <PegmanIcon />
-                </span>
-                <div>
-                  <p className="eyebrow">Street view</p>
-                  <h2>{streetViewState.sourceName}</h2>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="icon-button street-view-close"
-                onClick={closeStreetView}
-                aria-label="Close street view"
-                title="Close"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-            <StreetViewTimeSlider
-              entries={panoHistory}
-              activeIndex={panoHistoryIndex}
-              onChange={handlePanoHistoryChange}
-              fallbackDate={streetViewState.data.imageDate}
-            />
-            <div ref={streetViewDivRef} className="street-view-canvas" />
-          </section>
-        ) : null}
+        {streetViewState.status === "open"
+          ? (() => {
+              const panoLatLng = streetViewState.data.location?.latLng;
+              const coordinate: LatLng | null = panoLatLng
+                ? { lat: panoLatLng.lat(), lng: panoLatLng.lng() }
+                : selectedFeature?.coordinate ?? null;
+              const tagAddress = selectedFeature
+                ? buildAddressFromTags(selectedFeature.tags)
+                : null;
+              const streetViewAddress = tagAddress ?? resolvedAddress;
+              const externalLinks = coordinate
+                ? buildExternalLinks(coordinate, streetViewAddress)
+                : [];
+              return (
+                <section
+                  className="street-view-panel"
+                  aria-label="Street view"
+                  style={
+                    streetViewWidth !== null
+                      ? { width: `${streetViewWidth}px` }
+                      : undefined
+                  }
+                >
+                  <div
+                    className="street-view-resize-handle"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize street view panel"
+                    tabIndex={0}
+                    onPointerDown={handleStreetViewResizePointerDown}
+                    onPointerMove={handleStreetViewResizePointerMove}
+                    onPointerUp={endStreetViewResize}
+                    onPointerCancel={endStreetViewResize}
+                    onDoubleClick={handleStreetViewResizeDoubleClick}
+                    onKeyDown={handleStreetViewResizeKeyDown}
+                    title="Drag to resize · double-click to reset"
+                  >
+                    <span className="street-view-resize-grip" aria-hidden="true" />
+                  </div>
+                  <div className="street-view-header">
+                    <div className="street-view-header-title">
+                      <span className="street-view-badge" aria-hidden="true">
+                        <PegmanIcon />
+                      </span>
+                      <div>
+                        <p className="eyebrow">Street view</p>
+                        <h2>{streetViewState.sourceName}</h2>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="icon-button street-view-close"
+                      onClick={closeStreetView}
+                      aria-label="Close street view"
+                      title="Close"
+                    >
+                      <CloseIcon />
+                    </button>
+                  </div>
+                  {externalLinks.length > 0 ? (
+                    <div className="street-view-links external-links">
+                      {externalLinks.map((link) => (
+                        <a
+                          key={link.label}
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="external-link"
+                        >
+                          {link.label}
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                  <StreetViewTimeSlider
+                    entries={panoHistory}
+                    activeIndex={panoHistoryIndex}
+                    onChange={handlePanoHistoryChange}
+                    fallbackDate={streetViewState.data.imageDate}
+                  />
+                  <div ref={streetViewDivRef} className="street-view-canvas" />
+                </section>
+              );
+            })()
+          : null}
       </main>
     </div>
   );
@@ -2657,7 +2694,6 @@ function FeatureCard({
     : addressFallback ??
       placeTypeFallback ??
       (resolvingAddress ? "Locating nearest address…" : `Near ${formatCoordinate(selectedFeature.coordinate)}`);
-  const externalLinks = buildExternalLinks(selectedFeature.coordinate, address);
   const showCycle = totalMatches > 1;
   const positionLabel =
     showCycle && currentIndex >= 0
@@ -2727,19 +2763,6 @@ function FeatureCard({
             {selectedFeature.matchReason.detail}
           </p>
         ) : null}
-        <div className="external-links">
-          {externalLinks.map((link) => (
-            <a
-              key={link.label}
-              href={link.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="external-link"
-            >
-              {link.label}
-            </a>
-          ))}
-        </div>
         {tagRows.length > 0 ? (
           <ul className="tag-list">
             {tagRows.map((tag) => (
@@ -2762,6 +2785,7 @@ function MatchListPanel({
   onClose,
   onPrev,
   onNext,
+  rightOffset,
 }: {
   matches: SelectedFeature[];
   selectedId: string | null;
@@ -2769,6 +2793,7 @@ function MatchListPanel({
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
+  rightOffset: number;
 }) {
   const selectedRef = useRef<HTMLButtonElement | null>(null);
 
@@ -2777,7 +2802,11 @@ function MatchListPanel({
   }, [selectedId]);
 
   return (
-    <aside className="match-list-panel" aria-label="Match list">
+    <aside
+      className="match-list-panel"
+      aria-label="Match list"
+      style={{ "--match-list-right": `${rightOffset}px` } as React.CSSProperties}
+    >
       <div className="match-list-header">
         <div>
           <p className="eyebrow">Matches</p>
@@ -3613,60 +3642,13 @@ function buildExternalLinks(
 ): { label: string; url: string }[] {
   const lat = coordinate.lat.toFixed(6);
   const lng = coordinate.lng.toFixed(6);
-  const coordQuery = `${lat},${lng}`;
-  const fallbackQuery = address ?? coordQuery;
+  const fallbackQuery = address ?? `${lat},${lng}`;
   const encodedFallback = encodeURIComponent(fallbackQuery);
-
-  const zipMatch = address?.match(/\b(\d{5})(?:-\d{4})?\b/);
-  const zipcode = zipMatch?.[1];
-
-  // Zillow/LoopNet expect dash-separated path segments without URI-encoded
-  // spaces or commas; otherwise they 404 to the homepage.
-  const dashSlug = address
-    ? address
-        .replace(/,/g, "")
-        .replace(/\s+/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-|-$/g, "")
-    : null;
-
-  // Realtor.com joins location parts with underscores and words with dashes.
-  const realtorSlug = address
-    ? address
-        .split(",")
-        .map((part) => part.trim().replace(/\s+/g, "-"))
-        .filter(Boolean)
-        .join("_")
-    : null;
 
   return [
     {
       label: "Google Maps",
       url: `https://www.google.com/maps/search/?api=1&query=${encodedFallback}`,
-    },
-    {
-      label: "Zillow",
-      url: dashSlug
-        ? `https://www.zillow.com/homes/${encodeURIComponent(dashSlug)}_rb/`
-        : `https://www.zillow.com/homes/${lat},${lng}_ll/`,
-    },
-    {
-      label: "Redfin",
-      url: zipcode
-        ? `https://www.redfin.com/zipcode/${zipcode}`
-        : `https://www.redfin.com/?location=${encodedFallback}`,
-    },
-    {
-      label: "Realtor",
-      url: realtorSlug
-        ? `https://www.realtor.com/realestateandhomes-search/${encodeURIComponent(realtorSlug)}`
-        : `https://www.realtor.com/realestateandhomes-search/${lat},${lng}`,
-    },
-    {
-      label: "LoopNet",
-      url: dashSlug
-        ? `https://www.loopnet.com/search/commercial-real-estate/${encodeURIComponent(dashSlug.toLowerCase())}/for-sale/`
-        : `https://www.loopnet.com/search/commercial-real-estate/${lat},${lng}/for-sale/`,
     },
   ];
 }
