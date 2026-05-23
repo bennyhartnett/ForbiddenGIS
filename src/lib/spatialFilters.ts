@@ -915,6 +915,88 @@ export function applyPresetSpatialFilters(
       break;
     }
 
+    case "preset-featured-off-road":
+      for (const road of context.roads) {
+        const tags = getFeatureTags(road);
+        if (isClearlyPrivate(road)) continue;
+        if (!isUnpavedRoad(tags) && !isRoughOrHighClearanceRoad(tags)) continue;
+        addResult(
+          road,
+          "off-road",
+          "Public off-road / rough route",
+          undefined,
+          tagDetail(tags, ["highway", "surface", "tracktype", "smoothness", "access"]),
+        );
+      }
+      break;
+
+    case "preset-featured-fishing":
+      for (const feature of features) {
+        const tags = getFeatureTags(feature);
+        if (!isFishingFeature(tags)) continue;
+        addResult(
+          feature,
+          "water",
+          "Fishing spot",
+          undefined,
+          tagDetail(tags, ["leisure", "sport", "man_made", "amenity", "waterway", "name", "access"]),
+        );
+      }
+      break;
+
+    case "preset-featured-camping":
+      for (const feature of features) {
+        const tags = getFeatureTags(feature);
+        if (!isCampingFeature(tags)) continue;
+        addResult(
+          feature,
+          "park",
+          "Camping spot",
+          undefined,
+          tagDetail(tags, ["tourism", "leisure", "amenity", "shelter_type", "name", "access"]),
+        );
+      }
+      break;
+
+    case "preset-featured-hunting":
+      for (const feature of features) {
+        const tags = getFeatureTags(feature);
+        if (!isHuntingFeature(tags)) continue;
+        addResult(
+          feature,
+          "off-road",
+          "Hunting spot",
+          undefined,
+          tagDetail(tags, ["amenity", "leisure", "landuse", "boundary", "club", "name", "access"]),
+        );
+      }
+      break;
+
+    case "preset-featured-parking":
+      for (const parking of context.parking) {
+        if (isClearlyPrivate(parking)) continue;
+        const tags = getFeatureTags(parking);
+        addResult(
+          parking,
+          "parking",
+          "Public parking",
+          undefined,
+          tagDetail(tags, ["amenity", "parking", "fee", "access", "capacity", "name"]),
+        );
+      }
+      for (const pullOff of context.pullOffs) {
+        if (isClearlyPrivate(pullOff)) continue;
+        const tags = getFeatureTags(pullOff);
+        addResult(
+          pullOff,
+          "pull-off",
+          "Roadside pull-off",
+          undefined,
+          tagDetail(tags, ["highway", "parking", "amenity", "name", "access"]),
+        );
+      }
+      break;
+
     case "preset-weather":
       for (const feature of features) {
         const tags = getFeatureTags(feature);
@@ -1013,6 +1095,38 @@ export function isWeatherStation(tags: Record<string, string>): boolean {
   if (tags.man_made === "weather_station") return true;
   if (tags.amenity === "weather_station") return true;
   if (tags.man_made === "monitoring_station" && tags["monitoring:weather"]) return true;
+  return false;
+}
+
+export function isFishingFeature(tags: Record<string, string>): boolean {
+  if (tags.leisure === "fishing") return true;
+  if (tags.sport === "fishing") return true;
+  if (tags.leisure === "slipway") return true;
+  if (tags.man_made === "pier") return true;
+  if (tags.amenity === "fishing") return true;
+  if (tags.waterway === "fishpass") return true;
+  return false;
+}
+
+export function isCampingFeature(tags: Record<string, string>): boolean {
+  const tourism = tags.tourism;
+  if (tourism === "camp_site" || tourism === "caravan_site" || tourism === "camp_pitch" || tourism === "wilderness_hut") {
+    return true;
+  }
+  if (tags.leisure === "dispersed_camping") return true;
+  if (tags.amenity === "shelter") {
+    const type = tags.shelter_type;
+    if (type === "basic_hut" || type === "lean_to" || type === "weather_shelter") return true;
+  }
+  return false;
+}
+
+export function isHuntingFeature(tags: Record<string, string>): boolean {
+  if (tags.amenity === "hunting_stand" || tags.leisure === "hunting_stand") return true;
+  if (tags.landuse === "hunting_ground") return true;
+  if (tags.boundary === "hunting_area") return true;
+  if (tags.club === "hunting") return true;
+  if (tags.leisure === "game_reserve") return true;
   return false;
 }
 

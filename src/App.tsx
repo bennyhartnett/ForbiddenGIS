@@ -97,65 +97,14 @@ interface PresetCategory {
 
 const PRESET_CATEGORIES: PresetCategory[] = [
   {
-    id: "public-off-road",
-    label: "Public Off Road",
+    id: "featured",
+    label: "Featured",
     presetIds: new Set<PresetId>([
-      "preset-01",
-      "preset-dirt-roads",
-      "preset-15",
-      "preset-16",
-    ]),
-  },
-  {
-    id: "fishing-spots",
-    label: "Fishing Spots",
-    presetIds: new Set<PresetId>([
-      "preset-05",
-      "preset-08",
-      "preset-17",
-      "preset-21",
-      "preset-24",
-      "preset-27",
-      "preset-28",
-    ]),
-  },
-  {
-    id: "camping-spots",
-    label: "Camping Spots",
-    presetIds: new Set<PresetId>([
-      "preset-04",
-      "preset-07",
-      "preset-15",
-      "preset-18",
-      "preset-19",
-      "preset-22",
-    ]),
-  },
-  {
-    id: "hunting-spots",
-    label: "Hunting Spots",
-    presetIds: new Set<PresetId>([
-      "preset-07",
-      "preset-15",
-      "preset-18",
-      "preset-22",
-      "preset-26",
-      "preset-29",
-      "preset-32",
-    ]),
-  },
-  {
-    id: "public-parking",
-    label: "Public Parking",
-    presetIds: new Set<PresetId>([
-      "preset-04",
-      "preset-09",
-      "preset-10",
-      "preset-19",
-      "preset-20",
-      "preset-21",
-      "preset-22",
-      "preset-26",
+      "preset-featured-off-road",
+      "preset-featured-fishing",
+      "preset-featured-camping",
+      "preset-featured-hunting",
+      "preset-featured-parking",
     ]),
   },
 ];
@@ -239,7 +188,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [mode, setMode] = useState<Mode>("preset");
   const [tagFilter, setTagFilter] = useState("amenity=restaurant");
   const [rawQuery, setRawQuery] = useState(DEFAULT_RAW_QUERY);
-  const [presetId, setPresetId] = useState<PresetId>("preset-dirt-roads");
+  const [presetId, setPresetId] = useState<PresetId>("preset-featured-off-road");
   const [presetSearch, setPresetSearch] = useState("");
   const [presetCategory, setPresetCategory] = useState<string>(PRESET_CATEGORIES[0].id);
   const [showBuildings, setShowBuildings] = useState(false);
@@ -3277,6 +3226,46 @@ function PresetGlyph({ presetId }: { presetId: PresetId }) {
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M8 3v18M16 3v18" />
           <path d="M6 6h12M6 10h12M6 14h12M6 18h12" />
+        </svg>
+      );
+    case "preset-featured-off-road":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 17c1.5-2 3-2 4.5 0s3 2 4.5 0 3-2 4.5 0" />
+          <circle cx="6" cy="9" r="0.6" />
+          <circle cx="12" cy="6" r="0.6" />
+          <circle cx="18" cy="8" r="0.6" />
+        </svg>
+      );
+    case "preset-featured-fishing":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 12c4-5 9-5 13 0-4 5-9 5-13 0z" />
+          <circle cx="7" cy="12" r="0.8" />
+          <path d="M16 12l5-3M16 12l5 3" />
+        </svg>
+      );
+    case "preset-featured-camping":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4l9 16H3z" />
+          <path d="M12 4v16" />
+        </svg>
+      );
+    case "preset-featured-hunting":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+          <circle cx="12" cy="12" r="5" />
+          <circle cx="12" cy="12" r="1.5" />
+        </svg>
+      );
+    case "preset-featured-parking":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="4" y="3" width="16" height="18" rx="2" />
+          <path d="M9 7v10" />
+          <path d="M9 7h4a3 3 0 0 1 0 6h-4" />
         </svg>
       );
     case "preset-weather":

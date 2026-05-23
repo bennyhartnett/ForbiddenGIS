@@ -8,6 +8,11 @@ export interface PresetQueryOptions {
 }
 
 export const PRESETS: PresetDefinition[] = [
+  preset("preset-featured-off-road", "Public Off Road", "Public tracks, unpaved roads, and rough routes drivable by a 4x4 or high-clearance vehicle.", 14, true, true, false),
+  preset("preset-featured-fishing", "Fishing Spots", "Mapped fishing access, slipways, fishing piers, and water-edge spots tagged for angling.", 13, false, false, true),
+  preset("preset-featured-camping", "Camping Spots", "Campsites, caravan sites, camp pitches, and dispersed camping areas.", 12, false, false, false),
+  preset("preset-featured-hunting", "Hunting Spots", "Hunting stands, game reserves, and tagged hunting areas with mapped access.", 12, false, false, false),
+  preset("preset-featured-parking", "Public Parking", "Publicly accessible parking lots, laybys, and rest areas.", 14, false, false, false),
   preset("preset-dirt-roads", "Dirt & Gravel Roads", "Tracks with gravel, dirt, sand, grass, or graded unpaved surfaces drivable by a Jeep or similar 4x4.", 14, false, false, false),
   preset("preset-alleys", "Alleys & Service Lanes", "Back-lot alleys and service lanes threading between buildings.", 14, false, false, false),
   preset("preset-01", "Public Off-Road Routes", "Tracks and rough roads with no private or restricted access tags.", 14, true, true, false),
@@ -190,11 +195,54 @@ function presetClauses(
       return [...lowSpeedClauses(boxes.bbox), `way["highway"]["tree_lined"](${boxes.bbox});`, ...treeClauses(boxes.bbox60m), ...woodsClauses(boxes.bbox60m), ...buildingClauses(boxes.bbox100ft)];
     case "preset-35":
       return [...railwayClauses(boxes.bbox), ...fenceClauses(boxes.bbox60m)];
+    case "preset-featured-off-road":
+      return [...roughRoadClauses(boxes.bbox), ...unpavedRoadClauses(boxes.bbox)];
+    case "preset-featured-fishing":
+      return fishingClauses(boxes.bbox);
+    case "preset-featured-camping":
+      return campingClauses(boxes.bbox);
+    case "preset-featured-hunting":
+      return huntingClauses(boxes.bbox);
+    case "preset-featured-parking":
+      return [...parkingClauses(boxes.bbox), ...pullOffClauses(boxes.bbox)];
     case "preset-weather":
       return weatherStationClauses(boxes.bbox);
     case "preset-restricted":
       return restrictedAreaClauses(boxes.bbox);
   }
+}
+
+function fishingClauses(bbox: string): string[] {
+  return [
+    `nwr["leisure"="fishing"](${bbox});`,
+    `nwr["sport"="fishing"](${bbox});`,
+    `nwr["leisure"="slipway"](${bbox});`,
+    `nwr["man_made"="pier"](${bbox});`,
+    `nwr["amenity"="fishing"](${bbox});`,
+    `way["waterway"="fishpass"](${bbox});`,
+  ];
+}
+
+function campingClauses(bbox: string): string[] {
+  return [
+    `nwr["tourism"="camp_site"](${bbox});`,
+    `nwr["tourism"="caravan_site"](${bbox});`,
+    `nwr["tourism"="camp_pitch"](${bbox});`,
+    `nwr["tourism"="wilderness_hut"](${bbox});`,
+    `nwr["amenity"="shelter"]["shelter_type"~"^(basic_hut|lean_to|weather_shelter)$"](${bbox});`,
+    `nwr["leisure"="dispersed_camping"](${bbox});`,
+  ];
+}
+
+function huntingClauses(bbox: string): string[] {
+  return [
+    `nwr["amenity"="hunting_stand"](${bbox});`,
+    `nwr["leisure"="hunting_stand"](${bbox});`,
+    `nwr["landuse"="hunting_ground"](${bbox});`,
+    `nwr["boundary"="hunting_area"](${bbox});`,
+    `nwr["club"="hunting"](${bbox});`,
+    `nwr["leisure"="game_reserve"](${bbox});`,
+  ];
 }
 
 function restrictedAreaClauses(bbox: string): string[] {

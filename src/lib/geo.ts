@@ -134,6 +134,11 @@ export type PresetId =
   | "preset-33"
   | "preset-34"
   | "preset-35"
+  | "preset-featured-off-road"
+  | "preset-featured-fishing"
+  | "preset-featured-camping"
+  | "preset-featured-hunting"
+  | "preset-featured-parking"
   | "preset-weather"
   | "preset-restricted";
 
