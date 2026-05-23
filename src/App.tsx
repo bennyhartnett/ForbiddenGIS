@@ -280,6 +280,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [matchListOpen, setMatchListOpen] = useState(false);
   const [pegmanMode, setPegmanMode] = useState(false);
   const pegmanMapClickListenerRef = useRef<google.maps.MapsEventListener | null>(null);
+  const pegmanProjectionRef = useRef<google.maps.OverlayView | null>(null);
   const [streetViewWidth, setStreetViewWidth] = useState<number | null>(null);
   const streetViewResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
@@ -881,6 +882,65 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     setPegmanMode(true);
   }, [deactivatePegmanMode, pegmanMode, runStreetViewLookup]);
 
+  const handlePegmanDragStart = useCallback(
+    (event: React.DragEvent<HTMLButtonElement>) => {
+      const map = mapRef.current;
+      if (!map) {
+        event.preventDefault();
+        setError("The map is not ready yet.");
+        return;
+      }
+      setError(null);
+      pegmanMapClickListenerRef.current?.remove();
+      pegmanMapClickListenerRef.current = null;
+      streetViewCoverageRef.current?.setMap(map);
+      map.setOptions({ draggableCursor: null });
+      event.dataTransfer.effectAllowed = "copy";
+      event.dataTransfer.setData("application/x-pegman", "1");
+      setPegmanMode(true);
+    },
+    [],
+  );
+
+  const handlePegmanDragEnd = useCallback(() => {
+    deactivatePegmanMode();
+  }, [deactivatePegmanMode]);
+
+  const handleMapPegmanDragOver = useCallback(
+    (event: React.DragEvent<HTMLElement>) => {
+      if (!Array.from(event.dataTransfer.types).includes("application/x-pegman")) {
+        return;
+      }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    },
+    [],
+  );
+
+  const handleMapPegmanDrop = useCallback(
+    (event: React.DragEvent<HTMLElement>) => {
+      if (!Array.from(event.dataTransfer.types).includes("application/x-pegman")) {
+        return;
+      }
+      event.preventDefault();
+      const overlay = pegmanProjectionRef.current;
+      const projection = overlay?.getProjection();
+      const mapDiv = mapDivRef.current;
+      const maps = mapsRef.current;
+      if (!projection || !mapDiv || !maps) return;
+      const rect = mapDiv.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const latLng = projection.fromContainerPixelToLatLng(
+        new maps.maps.Point(x, y),
+      );
+      if (!latLng) return;
+      const coordinate = { lat: latLng.lat(), lng: latLng.lng() };
+      void runStreetViewLookup(coordinate, "Dropped pin");
+    },
+    [runStreetViewLookup],
+  );
+
   const scopeToLocation = useCallback(
     (queryOverride?: string, placeId?: string) => {
       const map = mapRef.current;
@@ -1051,6 +1111,15 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         if (maps.maps.StreetViewCoverageLayer) {
           streetViewCoverageRef.current = new maps.maps.StreetViewCoverageLayer();
         }
+
+        const ProjectionOverlay = class extends maps.maps.OverlayView {
+          onAdd() {}
+          draw() {}
+          onRemove() {}
+        };
+        const projectionOverlay = new ProjectionOverlay();
+        projectionOverlay.setMap(map);
+        pegmanProjectionRef.current = projectionOverlay;
         map.data.setStyle((feature) =>
           styleForDataFeature(maps, feature, featureColorMapRef.current),
         );
@@ -1307,7 +1376,13 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
   return (
     <div className="app-shell">
-      <main ref={mapRegionRef} className="map-region" aria-label="Map workspace">
+      <main
+        ref={mapRegionRef}
+        className="map-region"
+        aria-label="Map workspace"
+        onDragOver={handleMapPegmanDragOver}
+        onDrop={handleMapPegmanDrop}
+      >
         <div ref={mapDivRef} className="map-canvas" aria-label="Map" />
 
         <SearchPill
@@ -1423,6 +1498,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           onResetCamera={resetMapCamera}
           onFullscreen={enterMapFullscreen}
           onStreetView={togglePegmanMode}
+          onPegmanDragStart={handlePegmanDragStart}
+          onPegmanDragEnd={handlePegmanDragEnd}
         />
 
         <MapLegend
@@ -2322,6 +2399,8 @@ function MapControls(props: {
   onResetCamera: () => void;
   onFullscreen: () => void;
   onStreetView: () => void;
+  onPegmanDragStart: (event: React.DragEvent<HTMLButtonElement>) => void;
+  onPegmanDragEnd: (event: React.DragEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <nav className="map-controls" aria-label="Map controls">
@@ -2330,16 +2409,19 @@ function MapControls(props: {
           type="button"
           className={`pegman-button${props.pegmanActive ? " is-active" : ""}`}
           onClick={props.onStreetView}
+          draggable
+          onDragStart={props.onPegmanDragStart}
+          onDragEnd={props.onPegmanDragEnd}
           aria-label={
             props.pegmanActive
               ? "Cancel street view selection"
-              : "Drop pegman to open street view"
+              : "Click to drop pegman, or drag pegman onto the map for street view"
           }
           aria-pressed={props.pegmanActive}
           title={
             props.pegmanActive
               ? "Click on the map or press again to cancel"
-              : "Street view"
+              : "Street view — click then tap the map, or drag onto the map"
           }
         >
           <PegmanIcon />
