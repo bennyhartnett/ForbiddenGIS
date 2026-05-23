@@ -163,6 +163,18 @@ out skel qt;`;
 
 const GIBS_MIN_DATE = "2000-02-24";
 
+const STREET_VIEW_MIN_WIDTH = 320;
+const STREET_VIEW_MAX_WIDTH_VW = 0.85;
+const STREET_VIEW_DEFAULT_WIDTH_VW = 1 / 3;
+const STREET_VIEW_DEFAULT_WIDTH_CAP = 520;
+
+function computeDefaultStreetViewWidth(): number {
+  return Math.min(
+    STREET_VIEW_DEFAULT_WIDTH_CAP,
+    window.innerWidth * STREET_VIEW_DEFAULT_WIDTH_VW,
+  );
+}
+
 export default function App() {
   const apiKey = getGoogleMapsApiKey();
 
@@ -267,6 +279,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [matchListOpen, setMatchListOpen] = useState(false);
   const [pegmanMode, setPegmanMode] = useState(false);
   const pegmanMapClickListenerRef = useRef<google.maps.MapsEventListener | null>(null);
+  const [streetViewWidth, setStreetViewWidth] = useState<number | null>(null);
+  const streetViewResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const selectedPreset = useMemo(() => getPresetById(presetId), [presetId]);
   const activeWarning = searchWarning ?? boundsWarning;
@@ -1103,6 +1117,101 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     [panoHistory],
   );
 
+  const clampStreetViewWidth = useCallback((width: number) => {
+    const maxWidth = Math.max(
+      STREET_VIEW_MIN_WIDTH,
+      window.innerWidth * STREET_VIEW_MAX_WIDTH_VW,
+    );
+    return Math.min(maxWidth, Math.max(STREET_VIEW_MIN_WIDTH, width));
+  }, []);
+
+  useEffect(() => {
+    if (streetViewState.status !== "open") return;
+    if (streetViewWidth !== null) return;
+    setStreetViewWidth(clampStreetViewWidth(computeDefaultStreetViewWidth()));
+  }, [clampStreetViewWidth, streetViewState.status, streetViewWidth]);
+
+  useEffect(() => {
+    if (streetViewWidth === null) return;
+    const handleWindowResize = () => {
+      setStreetViewWidth((current) =>
+        current === null ? current : clampStreetViewWidth(current),
+      );
+    };
+    window.addEventListener("resize", handleWindowResize);
+    return () => window.removeEventListener("resize", handleWindowResize);
+  }, [clampStreetViewWidth, streetViewWidth]);
+
+  const handleStreetViewResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (streetViewWidth === null) return;
+      event.preventDefault();
+      const target = event.currentTarget;
+      target.setPointerCapture(event.pointerId);
+      streetViewResizeStateRef.current = {
+        startX: event.clientX,
+        startWidth: streetViewWidth,
+      };
+      document.body.classList.add("street-view-resizing");
+    },
+    [streetViewWidth],
+  );
+
+  const handleStreetViewResizePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const state = streetViewResizeStateRef.current;
+      if (!state) return;
+      const delta = state.startX - event.clientX;
+      setStreetViewWidth(clampStreetViewWidth(state.startWidth + delta));
+    },
+    [clampStreetViewWidth],
+  );
+
+  const endStreetViewResize = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!streetViewResizeStateRef.current) return;
+      streetViewResizeStateRef.current = null;
+      const target = event.currentTarget;
+      if (target.hasPointerCapture(event.pointerId)) {
+        target.releasePointerCapture(event.pointerId);
+      }
+      document.body.classList.remove("street-view-resizing");
+    },
+    [],
+  );
+
+  const handleStreetViewResizeDoubleClick = useCallback(() => {
+    setStreetViewWidth(clampStreetViewWidth(computeDefaultStreetViewWidth()));
+  }, [clampStreetViewWidth]);
+
+  const handleStreetViewResizeKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const step = event.shiftKey ? 64 : 16;
+      const direction = event.key === "ArrowLeft" ? 1 : -1;
+      setStreetViewWidth((current) =>
+        current === null
+          ? current
+          : clampStreetViewWidth(current + step * direction),
+      );
+    },
+    [clampStreetViewWidth],
+  );
+
+  useEffect(() => {
+    if (streetViewState.status !== "open" && streetViewWidth !== null) {
+      setStreetViewWidth(null);
+    }
+  }, [streetViewState.status, streetViewWidth]);
+
+  useEffect(() => {
+    const maps = mapsRef.current;
+    const panorama = panoramaRef.current;
+    if (!maps || !panorama) return;
+    maps.maps.event.trigger(panorama, "resize");
+  }, [streetViewWidth]);
+
   useEffect(() => {
     if (!selectedFeature) {
       setResolvedAddress(null);
@@ -1329,7 +1438,29 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         ) : null}
 
         {streetViewState.status === "open" ? (
-          <section className="street-view-panel" aria-label="Street view">
+          <section
+            className="street-view-panel"
+            aria-label="Street view"
+            style={
+              streetViewWidth !== null ? { width: `${streetViewWidth}px` } : undefined
+            }
+          >
+            <div
+              className="street-view-resize-handle"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize street view panel"
+              tabIndex={0}
+              onPointerDown={handleStreetViewResizePointerDown}
+              onPointerMove={handleStreetViewResizePointerMove}
+              onPointerUp={endStreetViewResize}
+              onPointerCancel={endStreetViewResize}
+              onDoubleClick={handleStreetViewResizeDoubleClick}
+              onKeyDown={handleStreetViewResizeKeyDown}
+              title="Drag to resize · double-click to reset"
+            >
+              <span className="street-view-resize-grip" aria-hidden="true" />
+            </div>
             <div className="street-view-header">
               <div className="street-view-header-title">
                 <span className="street-view-badge" aria-hidden="true">

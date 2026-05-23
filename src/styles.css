@@ -1913,12 +1913,62 @@ p {
   position: absolute;
   inset: 0 0 0 auto;
   z-index: 7;
-  width: min(50vw, 720px);
+  width: min(33.333vw, 520px);
   min-width: 320px;
+  max-width: 85vw;
   background: var(--surface);
   display: grid;
   grid-template-rows: auto auto 1fr;
   box-shadow: var(--shadow-3);
+}
+
+.street-view-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 10px;
+  z-index: 8;
+  cursor: ew-resize;
+  display: grid;
+  place-items: center;
+  touch-action: none;
+  background: transparent;
+  outline: none;
+}
+
+.street-view-resize-handle:hover,
+.street-view-resize-handle:focus-visible {
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    rgba(26, 115, 232, 0.12) 50%,
+    transparent 100%
+  );
+}
+
+.street-view-resize-handle:focus-visible .street-view-resize-grip,
+.street-view-resize-handle:hover .street-view-resize-grip {
+  background: var(--primary);
+  height: 56px;
+}
+
+.street-view-resize-grip {
+  width: 4px;
+  height: 36px;
+  background: var(--line-strong);
+  border-radius: 999px;
+  transition: background 120ms ease, height 120ms ease;
+}
+
+body.street-view-resizing,
+body.street-view-resizing * {
+  cursor: ew-resize !important;
+  user-select: none;
+}
+
+body.street-view-resizing .street-view-canvas {
+  pointer-events: none;
 }
 
 .street-view-time-slider {
@@ -2250,7 +2300,8 @@ p {
   }
 
   .street-view-panel {
-    width: 100%;
+    width: 100% !important;
+    max-width: 100% !important;
     height: 65vh;
     inset: auto 0 0 0;
     border-top-left-radius: 16px;
@@ -2267,6 +2318,10 @@ p {
     background: var(--line-strong);
     border-radius: 999px;
     margin: 6px auto 2px;
+  }
+
+  .street-view-resize-handle {
+    display: none;
   }
 
   .time-dock {
