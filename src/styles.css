@@ -217,6 +217,14 @@ p {
   stroke: var(--ink);
 }
 
+.search-pill .locate-button.is-active {
+  background: var(--primary-soft);
+}
+
+.search-pill .locate-button.is-active svg {
+  stroke: var(--primary);
+}
+
 .search-pill .pill-divider {
   width: 1px;
   height: 24px;

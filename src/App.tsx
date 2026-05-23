@@ -229,6 +229,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [locationQuery, setLocationQuery] = useState(DEFAULT_LOCATION_QUERY);
   const [placeSuggestions, setPlaceSuggestions] = useState<PlaceSuggestion[]>([]);
   const [suggestionsStatus, setSuggestionsStatus] = useState<string | null>(null);
+  const [geolocating, setGeolocating] = useState(false);
 
   // Map view state
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
@@ -921,6 +922,59 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     [locationQuery],
   );
 
+  const scopeToCurrentLocation = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) {
+      setError("Map is not ready yet.");
+      return;
+    }
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setError("Your browser does not support geolocation.");
+      return;
+    }
+
+    setError(null);
+    setPlaceSuggestions([]);
+    setGeolocating(true);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setGeolocating(false);
+        const { latitude, longitude } = position.coords;
+        const latLng = { lat: latitude, lng: longitude };
+        map.setCenter(latLng);
+        map.setZoom(Math.max(map.getZoom() ?? DEFAULT_ZOOM, 14));
+
+        const geocoder = geocoderRef.current;
+        const fallback = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+        if (!geocoder) {
+          setLocationQuery(fallback);
+          return;
+        }
+        geocoder.geocode({ location: latLng }, (results, status) => {
+          const formatted =
+            status === "OK" && results && results.length > 0
+              ? results[0].formatted_address
+              : null;
+          setLocationQuery(formatted ?? fallback);
+        });
+      },
+      (err) => {
+        setGeolocating(false);
+        const message =
+          err.code === err.PERMISSION_DENIED
+            ? "Location permission was denied. Allow location access in your browser to use this."
+            : err.code === err.POSITION_UNAVAILABLE
+              ? "Your location is currently unavailable. Try again in a moment."
+              : err.code === err.TIMEOUT
+                ? "Timed out while trying to get your location."
+                : "Could not get your current location.";
+        setError(message);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+    );
+  }, []);
+
   const zoomMap = useCallback((delta: number) => {
     const map = mapRef.current;
     if (!map) return;
@@ -1269,6 +1323,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
             scopeToLocation(suggestion.description, suggestion.placeId)
           }
           onClearSuggestions={() => setPlaceSuggestions([])}
+          onUseMyLocation={scopeToCurrentLocation}
+          geolocating={geolocating}
           loading={loading}
           mapStatus={mapStatus}
           zoom={zoom}
@@ -1505,6 +1561,8 @@ function SearchPill({
   suggestionsStatus,
   onSelectSuggestion,
   onClearSuggestions,
+  onUseMyLocation,
+  geolocating,
   loading,
   mapStatus,
   zoom,
@@ -1516,6 +1574,8 @@ function SearchPill({
   suggestionsStatus: string | null;
   onSelectSuggestion: (suggestion: PlaceSuggestion) => void;
   onClearSuggestions: () => void;
+  onUseMyLocation: () => void;
+  geolocating: boolean;
   loading: boolean;
   mapStatus: string;
   zoom: number;
@@ -1555,6 +1615,16 @@ function SearchPill({
             <CloseIcon />
           </button>
         ) : null}
+        <button
+          type="button"
+          className={`icon-button locate-button${geolocating ? " is-active" : ""}`}
+          onClick={onUseMyLocation}
+          aria-label="Use my current location"
+          title="Use my current location"
+          disabled={geolocating}
+        >
+          {geolocating ? <SpinnerIcon /> : <LocateIcon />}
+        </button>
         <div className="pill-divider" aria-hidden="true" />
         <button
           type="submit"
@@ -2812,6 +2882,15 @@ function CompassIcon() {
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="9" />
       <path d="m14.6 7.6-1.8 5.2-5.2 1.8 1.8-5.2z" />
+    </svg>
+  );
+}
+
+function LocateIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
     </svg>
   );
 }
