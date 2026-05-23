@@ -9,7 +9,7 @@ export interface PresetQueryOptions {
 
 export const PRESETS: PresetDefinition[] = [
   preset("preset-featured-off-road", "Public Off Road", "Public tracks, unpaved roads, and rough routes drivable by a 4x4 or high-clearance vehicle.", 14, true, true, false),
-  preset("preset-featured-fishing", "Fishing Spots", "Mapped fishing access, slipways, fishing piers, and water-edge spots tagged for angling.", 13, false, false, true),
+  preset("preset-featured-fishing", "Fishing Spots", "Mapped fishing access — fishing-tagged piers, slipways, fish passes, and any feature tagged for angling.", 13, false, false, true),
   preset("preset-featured-camping", "Camping Spots", "Campsites, caravan sites, camp pitches, and dispersed camping areas.", 12, false, false, false),
   preset("preset-featured-hunting", "Hunting Spots", "Hunting stands, game reserves, and tagged hunting areas with mapped access.", 12, false, false, false),
   preset("preset-featured-parking", "Public Parking", "Publicly accessible parking lots, laybys, and rest areas.", 14, false, false, false),
@@ -216,10 +216,16 @@ function fishingClauses(bbox: string): string[] {
   return [
     `nwr["leisure"="fishing"](${bbox});`,
     `nwr["sport"="fishing"](${bbox});`,
-    `nwr["leisure"="slipway"](${bbox});`,
-    `nwr["man_made"="pier"](${bbox});`,
     `nwr["amenity"="fishing"](${bbox});`,
+    `nwr["tourism"="fishing"](${bbox});`,
+    `nwr["fishing"~"^(yes|designated|sport|coarse|fly|sea)$"](${bbox});`,
+    `nwr["man_made"="pier"]["fishing"~"^(yes|designated)$"](${bbox});`,
+    `nwr["man_made"="pier"]["sport"="fishing"](${bbox});`,
+    `nwr["man_made"="pier"]["leisure"="fishing"](${bbox});`,
+    `nwr["leisure"="slipway"](${bbox});`,
+    `way["waterway"="fish_pass"](${bbox});`,
     `way["waterway"="fishpass"](${bbox});`,
+    `node["seamark:type"="fishing_facility"](${bbox});`,
   ];
 }
 

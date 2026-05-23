@@ -937,9 +937,20 @@ export function applyPresetSpatialFilters(
         addResult(
           feature,
           "water",
-          "Fishing spot",
+          classifyFishingFeature(tags),
           undefined,
-          tagDetail(tags, ["leisure", "sport", "man_made", "amenity", "waterway", "name", "access"]),
+          tagDetail(tags, [
+            "name",
+            "leisure",
+            "sport",
+            "fishing",
+            "tourism",
+            "man_made",
+            "amenity",
+            "waterway",
+            "seamark:type",
+            "access",
+          ]),
         );
       }
       break;
@@ -1101,11 +1112,37 @@ export function isWeatherStation(tags: Record<string, string>): boolean {
 export function isFishingFeature(tags: Record<string, string>): boolean {
   if (tags.leisure === "fishing") return true;
   if (tags.sport === "fishing") return true;
-  if (tags.leisure === "slipway") return true;
-  if (tags.man_made === "pier") return true;
   if (tags.amenity === "fishing") return true;
-  if (tags.waterway === "fishpass") return true;
+  if (tags.tourism === "fishing") return true;
+  if (isFishingAllowedTag(tags.fishing)) return true;
+  if (tags["seamark:type"] === "fishing_facility") return true;
+  if (tags.waterway === "fish_pass" || tags.waterway === "fishpass") return true;
+  if (tags.leisure === "slipway") return true;
+  if (
+    tags.man_made === "pier" &&
+    (isFishingAllowedTag(tags.fishing) || tags.sport === "fishing" || tags.leisure === "fishing")
+  ) {
+    return true;
+  }
   return false;
+}
+
+function isFishingAllowedTag(value: string | undefined): boolean {
+  if (!value) return false;
+  return ["yes", "designated", "sport", "coarse", "fly", "sea"].includes(value.toLowerCase());
+}
+
+export function classifyFishingFeature(tags: Record<string, string>): string {
+  if (tags.leisure === "fishing" || tags.sport === "fishing" || tags.amenity === "fishing") {
+    return "Fishing spot";
+  }
+  if (tags.tourism === "fishing") return "Fishing tourism site";
+  if (tags.man_made === "pier") return "Fishing pier";
+  if (tags.leisure === "slipway") return "Boat slipway";
+  if (tags.waterway === "fish_pass" || tags.waterway === "fishpass") return "Fish pass";
+  if (tags["seamark:type"] === "fishing_facility") return "Fishing facility";
+  if (isFishingAllowedTag(tags.fishing)) return "Fishing access";
+  return "Fishing spot";
 }
 
 export function isCampingFeature(tags: Record<string, string>): boolean {
