@@ -413,6 +413,30 @@ p {
   max-height: calc(100vh - 88px);
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.panel::-webkit-scrollbar {
+  width: 10px;
+}
+
+.panel::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 12px;
+  margin: 12px 0;
+}
+
+.panel::-webkit-scrollbar-thumb {
+  background-color: var(--line-strong);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+
+.panel::-webkit-scrollbar-thumb:hover {
+  background-color: var(--muted);
+  background-clip: content-box;
 }
 
 .panel-footer {
