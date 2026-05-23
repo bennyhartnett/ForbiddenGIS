@@ -2498,10 +2498,13 @@ function FeatureCard({
   const tagAddress = buildAddressFromTags(selectedFeature.tags);
   const address = tagAddress ?? resolvedAddress;
   const hasOsmName = selectedFeature.name !== "Unnamed location";
-  const titleFallback = resolvedAddress?.split(",")[0]?.trim() || null;
+  const addressFallback = pickAddressTitle(tagAddress ?? resolvedAddress);
+  const placeTypeFallback = describePlaceType(selectedFeature.tags);
   const displayName = hasOsmName
     ? selectedFeature.name
-    : titleFallback ?? selectedFeature.name;
+    : addressFallback ??
+      placeTypeFallback ??
+      (resolvingAddress ? "Locating nearest address…" : `Near ${formatCoordinate(selectedFeature.coordinate)}`);
   const externalLinks = buildExternalLinks(selectedFeature.coordinate, address);
   const showCycle = totalMatches > 1;
   const positionLabel =
@@ -3388,6 +3391,59 @@ function buildAddressFromTags(tags: Record<string, string>): string | null {
   const cityLine = [city, state].filter(Boolean).join(", ");
   const lines = [streetLine, cityLine, postcode].filter(Boolean);
   return lines.length > 0 ? lines.join(", ") : null;
+}
+
+function pickAddressTitle(address: string | null): string | null {
+  if (!address) return null;
+  const parts = address
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return null;
+
+  const first = parts[0];
+  const hasStreetNumber = /^\d/.test(first);
+  if (hasStreetNumber && parts.length > 1) {
+    return `${first}, ${parts[1]}`;
+  }
+  if (first.length < 4 && parts.length > 1) {
+    return `${first}, ${parts[1]}`;
+  }
+  return first;
+}
+
+const PLACE_TYPE_TAGS = [
+  "amenity",
+  "shop",
+  "tourism",
+  "leisure",
+  "office",
+  "craft",
+  "historic",
+  "natural",
+  "landuse",
+  "building",
+  "highway",
+  "railway",
+  "waterway",
+  "aeroway",
+  "man_made",
+  "power",
+];
+
+function describePlaceType(tags: Record<string, string>): string | null {
+  for (const key of PLACE_TYPE_TAGS) {
+    const value = tags[key];
+    if (!value || value === "yes" || value === "no") continue;
+    return humanizeTagValue(value);
+  }
+  return null;
+}
+
+function humanizeTagValue(value: string): string {
+  const cleaned = value.replace(/[_;]+/g, " ").trim();
+  if (!cleaned) return value;
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
 }
 
 function buildExternalLinks(
