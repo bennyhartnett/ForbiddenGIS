@@ -79,10 +79,15 @@ interface PanoEntry {
 
 type StreetViewState =
   | { status: "idle" }
-  | { status: "searching"; sourceName: string }
-  | { status: "open"; sourceName: string; data: google.maps.StreetViewPanoramaData }
-  | { status: "none"; sourceName: string; message: string }
-  | { status: "error"; sourceName: string; message: string };
+  | { status: "searching"; sourceName: string; scoutId?: string }
+  | {
+      status: "open";
+      sourceName: string;
+      scoutId?: string;
+      data: google.maps.StreetViewPanoramaData;
+    }
+  | { status: "none"; sourceName: string; scoutId?: string; message: string }
+  | { status: "error"; sourceName: string; scoutId?: string; message: string };
 
 interface PresetCategory {
   id: string;
@@ -473,7 +478,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   }, []);
 
   const runStreetViewLookup = useCallback(
-    async (coordinate: LatLng, sourceName: string) => {
+    async (coordinate: LatLng, sourceName: string, scoutId?: string) => {
       const maps = mapsRef.current;
       const service = streetViewServiceRef.current;
       const lookupId = streetViewLookupIdRef.current + 1;
@@ -483,12 +488,13 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         setStreetViewState({
           status: "error",
           sourceName,
+          scoutId,
           message: "Street view isn't ready yet.",
         });
         return;
       }
 
-      setStreetViewState({ status: "searching", sourceName });
+      setStreetViewState({ status: "searching", sourceName, scoutId });
 
       try {
         const panorama = await findNearestStreetView(maps, service, coordinate);
@@ -497,16 +503,18 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           setStreetViewState({
             status: "none",
             sourceName,
+            scoutId,
             message: "No street view available nearby.",
           });
           return;
         }
-        setStreetViewState({ status: "open", sourceName, data: panorama });
+        setStreetViewState({ status: "open", sourceName, scoutId, data: panorama });
       } catch (lookupError) {
         if (streetViewLookupIdRef.current !== lookupId) return;
         setStreetViewState({
           status: "error",
           sourceName,
+          scoutId,
           message:
             lookupError instanceof Error ? lookupError.message : "Couldn't load street view.",
         });
@@ -526,7 +534,11 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       );
       if (!selected) return;
       setSelectedFeature(selected);
-      void runStreetViewLookup(selected.coordinate, selected.name);
+      void runStreetViewLookup(
+        selected.coordinate,
+        pickFeatureDisplayName(selected, null, false),
+        selected.scoutId,
+      );
     },
     [runStreetViewLookup],
   );
@@ -558,7 +570,11 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         selectedDataFeatureRef.current?.setProperty("scoutSelected", false);
         selectedDataFeatureRef.current = null;
         setSelectedFeature(match);
-        void runStreetViewLookup(match.coordinate, match.name);
+        void runStreetViewLookup(
+          match.coordinate,
+          pickFeatureDisplayName(match, null, false),
+          match.scoutId,
+        );
       }
     },
     [runStreetViewLookup, selectDataFeature],
@@ -1373,6 +1389,17 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       cancelled = true;
     };
   }, [selectedFeature]);
+
+  useEffect(() => {
+    if (!selectedFeature) return;
+    const nextName = pickFeatureDisplayName(selectedFeature, resolvedAddress, resolvingAddress);
+    setStreetViewState((prev) => {
+      if (prev.status === "idle") return prev;
+      if (prev.scoutId !== selectedFeature.scoutId) return prev;
+      if (prev.sourceName === nextName) return prev;
+      return { ...prev, sourceName: nextName };
+    });
+  }, [selectedFeature, resolvedAddress, resolvingAddress]);
 
   return (
     <div className="app-shell">
@@ -2649,14 +2676,7 @@ function FeatureCard({
   const tagRows = summarizeTags(selectedFeature.tags, 10);
   const tagAddress = buildAddressFromTags(selectedFeature.tags);
   const address = tagAddress ?? resolvedAddress;
-  const hasOsmName = selectedFeature.name !== "Unnamed location";
-  const addressFallback = pickAddressTitle(tagAddress ?? resolvedAddress);
-  const placeTypeFallback = describePlaceType(selectedFeature.tags);
-  const displayName = hasOsmName
-    ? selectedFeature.name
-    : addressFallback ??
-      placeTypeFallback ??
-      (resolvingAddress ? "Locating nearest address…" : `Near ${formatCoordinate(selectedFeature.coordinate)}`);
+  const displayName = pickFeatureDisplayName(selectedFeature, resolvedAddress, resolvingAddress);
   const externalLinks = buildExternalLinks(selectedFeature.coordinate, address);
   const showCycle = totalMatches > 1;
   const positionLabel =
@@ -3552,6 +3572,21 @@ function buildAddressFromTags(tags: Record<string, string>): string | null {
   const cityLine = [city, state].filter(Boolean).join(", ");
   const lines = [streetLine, cityLine, postcode].filter(Boolean);
   return lines.length > 0 ? lines.join(", ") : null;
+}
+
+function pickFeatureDisplayName(
+  feature: SelectedFeature,
+  resolvedAddress: string | null,
+  resolvingAddress: boolean,
+): string {
+  if (feature.name && feature.name !== "Unnamed location") return feature.name;
+  const tagAddress = buildAddressFromTags(feature.tags);
+  const addressTitle = pickAddressTitle(tagAddress ?? resolvedAddress);
+  if (addressTitle) return addressTitle;
+  const placeType = describePlaceType(feature.tags);
+  if (placeType) return placeType;
+  if (resolvingAddress) return "Locating nearest address…";
+  return `Near ${formatCoordinate(feature.coordinate)}`;
 }
 
 function pickAddressTitle(address: string | null): string | null {
