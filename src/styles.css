@@ -1663,7 +1663,7 @@ p {
 
 .match-list-panel {
   position: absolute;
-  right: 16px;
+  right: var(--match-list-right, 16px);
   top: 80px;
   z-index: 6;
   width: min(320px, calc(100vw - 32px));
@@ -1674,6 +1674,7 @@ p {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
+  transition: right 160ms ease;
 }
 
 .match-list-header {
@@ -1925,9 +1926,14 @@ p {
   min-width: 320px;
   max-width: 85vw;
   background: var(--surface);
-  display: grid;
-  grid-template-rows: auto auto 1fr;
+  display: flex;
+  flex-direction: column;
   box-shadow: var(--shadow-3);
+}
+
+.street-view-links {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
 }
 
 .street-view-resize-handle {
@@ -2151,6 +2157,7 @@ body.street-view-resizing .street-view-canvas {
 }
 
 .street-view-canvas {
+  flex: 1;
   min-height: 0;
 }
 
