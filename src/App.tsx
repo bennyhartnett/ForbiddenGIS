@@ -1709,12 +1709,36 @@ function SearchPill({
   mapStatus: string;
   zoom: number;
 }) {
+  const containerRef = useRef<HTMLFormElement>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [dropdownOpen]);
+
+  const showDropdown = dropdownOpen && (suggestions.length > 0 || Boolean(suggestionsStatus));
+
   return (
     <form
+      ref={containerRef}
       className="search-pill"
       onSubmit={(event) => {
         event.preventDefault();
+        setDropdownOpen(false);
         onSubmit();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && dropdownOpen) {
+          event.stopPropagation();
+          setDropdownOpen(false);
+        }
       }}
       role="search"
       aria-label="Search location"
@@ -1725,7 +1749,11 @@ function SearchPill({
         </span>
         <input
           value={locationQuery}
-          onChange={(event) => onLocationChange(event.target.value)}
+          onChange={(event) => {
+            setDropdownOpen(true);
+            onLocationChange(event.target.value);
+          }}
+          onFocus={() => setDropdownOpen(true)}
           placeholder="Search a place or address"
           autoComplete="off"
           spellCheck={false}
@@ -1738,6 +1766,7 @@ function SearchPill({
             onClick={() => {
               onLocationChange("");
               onClearSuggestions();
+              setDropdownOpen(false);
             }}
             aria-label="Clear"
           >
@@ -1747,7 +1776,10 @@ function SearchPill({
         <button
           type="button"
           className={`icon-button locate-button${geolocating ? " is-active" : ""}`}
-          onClick={onUseMyLocation}
+          onClick={() => {
+            setDropdownOpen(false);
+            onUseMyLocation();
+          }}
           aria-label="Use my current location"
           title="Use my current location"
           disabled={geolocating}
@@ -1765,27 +1797,32 @@ function SearchPill({
           {loading ? <SpinnerIcon /> : <ArrowRightIcon />}
         </button>
       </div>
-      {suggestions.length > 0 ? (
-        <div className="search-suggestions" role="listbox" aria-label="Location suggestions">
-          {suggestions.map((suggestion) => (
-            <button
-              key={suggestion.placeId}
-              type="button"
-              className="search-suggestion"
-              onClick={() => onSelectSuggestion(suggestion)}
-            >
-              <span className="pin-icon" aria-hidden="true">
-                <PinIcon />
-              </span>
-              <span className="search-suggestion-main">
-                <strong>{suggestion.mainText}</strong>
-                {suggestion.secondaryText ? <small>{suggestion.secondaryText}</small> : null}
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : suggestionsStatus ? (
-        <div className="search-suggestion-status">{suggestionsStatus}</div>
+      {showDropdown ? (
+        suggestions.length > 0 ? (
+          <div className="search-suggestions" role="listbox" aria-label="Location suggestions">
+            {suggestions.map((suggestion) => (
+              <button
+                key={suggestion.placeId}
+                type="button"
+                className="search-suggestion"
+                onClick={() => {
+                  setDropdownOpen(false);
+                  onSelectSuggestion(suggestion);
+                }}
+              >
+                <span className="pin-icon" aria-hidden="true">
+                  <PinIcon />
+                </span>
+                <span className="search-suggestion-main">
+                  <strong>{suggestion.mainText}</strong>
+                  {suggestion.secondaryText ? <small>{suggestion.secondaryText}</small> : null}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : suggestionsStatus ? (
+          <div className="search-suggestion-status">{suggestionsStatus}</div>
+        ) : null
       ) : null}
     </form>
   );
