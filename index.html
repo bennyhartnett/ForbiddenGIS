@@ -3,10 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://maps.googleapis.com https://maps.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://maps.googleapis.com https://maps.gstatic.com https://overpass-api.de https://overpass.kumi.systems https://overpass.private.coffee https://api.weather.gov https://gibs.earthdata.nasa.gov; frame-src https://www.google.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none'"
+    />
     <meta
       name="description"
       content="ForbiddenGIS — scout locations on the map and inspect them up close."
     />
+    <link rel="preconnect" href="https://maps.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://maps.gstatic.com" crossorigin />
+    <link rel="dns-prefetch" href="https://overpass-api.de" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" id="favicon" />
     <title>ForbiddenGIS</title>
   </head>

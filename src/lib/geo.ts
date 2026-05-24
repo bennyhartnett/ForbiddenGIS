@@ -224,10 +224,15 @@ export function featureBounds(feature: GeoJSONFeature): BBox | null {
   }
 }
 
-export function representativeCoordinate(feature: GeoJSONFeature): LatLng {
+export function representativeCoordinate(feature: GeoJSONFeature): LatLng | null {
   const props = feature.properties;
 
-  if (typeof props?.scoutLat === "number" && typeof props?.scoutLng === "number") {
+  if (
+    typeof props?.scoutLat === "number" &&
+    typeof props?.scoutLng === "number" &&
+    Number.isFinite(props.scoutLat) &&
+    Number.isFinite(props.scoutLng)
+  ) {
     return { lat: props.scoutLat, lng: props.scoutLng };
   }
 
@@ -242,11 +247,11 @@ export function representativeCoordinate(feature: GeoJSONFeature): LatLng {
   }
 
   const fallback = firstCoordinate(feature.geometry);
-  if (fallback) {
+  if (fallback && Number.isFinite(fallback[0]) && Number.isFinite(fallback[1])) {
     return { lat: fallback[1], lng: fallback[0] };
   }
 
-  return { lat: 0, lng: 0 };
+  return null;
 }
 
 export function attachScoutMetadata(
@@ -255,9 +260,10 @@ export function attachScoutMetadata(
   role: ScoutRole,
   category: ScoutCategory,
   reason: MatchReason,
-): GeoJSONFeature {
+): GeoJSONFeature | null {
   const copy = structuredClone(feature) as GeoJSONFeature;
   const coordinate = representativeCoordinate(copy);
+  if (!coordinate) return null;
   const tags = getFeatureTags(copy);
   const osmType = getOsmType(copy);
   const osmId = getOsmId(copy);

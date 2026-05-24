@@ -17,7 +17,8 @@ const TEST_AREAS: { name: string; bbox: BBox }[] = [
 ];
 
 const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
-const USER_AGENT = "forbiddengis-tests/0.1 (testing; contact: bhartnett@lionfederal.com)";
+const USER_AGENT =
+  "forbiddengis-tests/0.1 (testing; contact: https://github.com/bennyhartnett/forbiddengis/issues)";
 const DELAY_BETWEEN_QUERIES_MS = 2000;
 const RENDER_LIMIT = 5000;
 
