@@ -49,7 +49,6 @@ import {
 } from "./lib/featureColors";
 import {
   exportFeatureCollection,
-  mergeFeatureCollections,
   type ExportFormat,
 } from "./lib/exporters";
 
@@ -798,15 +797,11 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         type: "FeatureCollection",
         features: result.features,
       };
-      const finalCollection = mergeFeatureCollections(
-        loadedFeaturesRef.current,
-        newCollection,
-      );
 
-      renderFeatures(finalCollection);
+      renderFeatures(newCollection);
       setRawFeatureCount(overpass.rawFeatureCount);
-      setResultCount(finalCollection.features.length);
-      setRenderedFeatureCount(finalCollection.features.length);
+      setResultCount(newCollection.features.length);
+      setRenderedFeatureCount(newCollection.features.length);
       setSearchWarning(result.warnings[0] ?? null);
       const startedAt = searchStartedAtRef.current;
       if (startedAt !== null) {
