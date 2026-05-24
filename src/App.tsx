@@ -644,6 +644,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       });
       setStreetViewAvailability(new Set());
       setResultFeatures(matches);
+      setMatchListOpen(matches.length > 0);
     },
     [clearDataLayer],
   );
@@ -1525,24 +1526,28 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           </button>
         ) : null}
 
-        <PresetPanel
-          open={presetPanelOpen}
-          onToggle={() => setPresetPanelOpen((v) => !v)}
-          presetId={presetId}
-          onPresetChange={setPresetId}
-          presetSearch={presetSearch}
-          onPresetSearchChange={setPresetSearch}
-          presetCategory={presetCategory}
-          onPresetCategoryChange={setPresetCategory}
-          filteredPresets={filteredPresets}
-          loading={loading}
-          onSearch={() => void handleSearch()}
-          onClear={clearResults}
-          resultCount={resultCount}
-          elapsedMs={elapsedMs}
-          lastSearchDurationMs={lastSearchDurationMs}
-          searchOutcome={searchOutcome}
-        />
+        {matchListOpen && resultFeatures.length > 0 ? null : (
+          <PresetPanel
+            open={presetPanelOpen}
+            onToggle={() => setPresetPanelOpen((v) => !v)}
+            presetId={presetId}
+            onPresetChange={setPresetId}
+            presetSearch={presetSearch}
+            onPresetSearchChange={setPresetSearch}
+            presetCategory={presetCategory}
+            onPresetCategoryChange={setPresetCategory}
+            filteredPresets={filteredPresets}
+            loading={loading}
+            onSearch={() => void handleSearch()}
+            onClear={clearResults}
+            resultCount={resultCount}
+            elapsedMs={elapsedMs}
+            lastSearchDurationMs={lastSearchDurationMs}
+            searchOutcome={searchOutcome}
+            hasMatches={resultFeatures.length > 0}
+            onShowMatches={() => setMatchListOpen(true)}
+          />
+        )}
 
         <FloatingExport
           loadedFeatureCount={loadedFeatureCount}
@@ -1616,33 +1621,13 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           {error ? <p className="notice error">{error}</p> : null}
         </div>
 
-        {resultFeatures.length > 0 && !matchListOpen ? (
-          <button
-            type="button"
-            className="match-browse-chip"
-            onClick={() => setMatchListOpen(true)}
-            aria-label={`Browse ${resultFeatures.length} matches`}
-          >
-            <ListIcon />
-            Browse {resultFeatures.length.toLocaleString()}{" "}
-            {resultFeatures.length === 1 ? "match" : "matches"}
-          </button>
-        ) : null}
-
         {matchListOpen && resultFeatures.length > 0 ? (
           <MatchListPanel
             matches={resultFeatures}
             selectedId={selectedFeature?.scoutId ?? null}
             streetViewAvailability={streetViewAvailability}
             onSelect={focusMatch}
-            onClose={() => setMatchListOpen(false)}
-            onPrev={() => cycleMatch(-1)}
-            onNext={() => cycleMatch(1)}
-            rightOffset={
-              streetViewState.status !== "idle" && streetViewWidth !== null
-                ? streetViewWidth + 16
-                : 16
-            }
+            onBack={() => setMatchListOpen(false)}
           />
         ) : null}
 
@@ -1967,6 +1952,8 @@ function PresetPanel(props: {
   elapsedMs: number;
   lastSearchDurationMs: number | null;
   searchOutcome: "idle" | "success" | "error";
+  hasMatches: boolean;
+  onShowMatches: () => void;
 }) {
   return (
     <aside className={`panel preset-panel ${props.open ? "" : "collapsed"}`} aria-label="I'm Looking For">
@@ -1975,6 +1962,17 @@ function PresetPanel(props: {
           <CompassIcon />
         </span>
         <h2>I'm Looking For</h2>
+        {props.hasMatches ? (
+          <button
+            type="button"
+            className="panel-toggle"
+            onClick={props.onShowMatches}
+            aria-label="Show matches"
+            title="Show matches"
+          >
+            <ChevronRightIcon />
+          </button>
+        ) : null}
         <button
           type="button"
           className="panel-toggle"
@@ -2817,19 +2815,13 @@ function MatchListPanel({
   selectedId,
   streetViewAvailability,
   onSelect,
-  onClose,
-  onPrev,
-  onNext,
-  rightOffset,
+  onBack,
 }: {
   matches: SelectedFeature[];
   selectedId: string | null;
   streetViewAvailability: Set<string>;
   onSelect: (match: SelectedFeature) => void;
-  onClose: () => void;
-  onPrev: () => void;
-  onNext: () => void;
-  rightOffset: number;
+  onBack: () => void;
 }) {
   const selectedRef = useRef<HTMLButtonElement | null>(null);
 
@@ -2838,46 +2830,23 @@ function MatchListPanel({
   }, [selectedId]);
 
   return (
-    <aside
-      className="match-list-panel"
-      aria-label="Match list"
-      style={{ "--match-list-right": `${rightOffset}px` } as React.CSSProperties}
-    >
+    <aside className="panel match-list-panel" aria-label="Match list">
       <div className="match-list-header">
-        <div>
+        <button
+          type="button"
+          className="match-list-back"
+          onClick={onBack}
+          aria-label="Back to I'm Looking For"
+          title="Back to I'm Looking For"
+        >
+          <ChevronLeftIcon />
+        </button>
+        <div className="match-list-heading">
           <p className="eyebrow">Matches</p>
           <h2>
             {matches.length.toLocaleString()}{" "}
             {matches.length === 1 ? "result" : "results"}
           </h2>
-        </div>
-        <div className="match-list-actions">
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onPrev}
-            aria-label="Previous match"
-            disabled={matches.length < 2}
-          >
-            <ChevronLeftIcon />
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onNext}
-            aria-label="Next match"
-            disabled={matches.length < 2}
-          >
-            <ChevronRightIcon />
-          </button>
-          <button
-            type="button"
-            className="panel-toggle"
-            onClick={onClose}
-            aria-label="Close match list"
-          >
-            <CloseIcon />
-          </button>
         </div>
       </div>
       <ol className="match-list">
@@ -3028,17 +2997,6 @@ function ChevronLeftIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="m15 6-6 6 6 6" />
-    </svg>
-  );
-}
-
-function ListIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M8 6h13M8 12h13M8 18h13" />
-      <circle cx="4" cy="6" r="1" />
-      <circle cx="4" cy="12" r="1" />
-      <circle cx="4" cy="18" r="1" />
     </svg>
   );
 }
