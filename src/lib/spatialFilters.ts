@@ -55,6 +55,28 @@ export const OFF_ROAD_MIN_LENGTH_METERS = 30.48;
 
 const PRIVATE_VALUES = new Set(["private", "no", "customers", "permit"]);
 const RESTRICTED_VALUES = new Set(["private", "no", "customers", "permit", "destination"]);
+const MOTOR_FORBIDDEN_VALUES = new Set([
+  "private",
+  "no",
+  "customers",
+  "permit",
+  "destination",
+  "agricultural",
+  "forestry",
+  "delivery",
+]);
+const POSITIVE_ACCESS_VALUES = new Set(["yes", "designated", "permissive", "official"]);
+const NON_MOTORIZED_ACCESS_KEYS = ["foot", "bicycle", "horse"];
+const MOTOR_VEHICLE_ACCESS_KEYS = ["motor_vehicle", "vehicle", "motorcar"];
+const IMPLICIT_NON_MOTORIZED_HIGHWAYS = new Set([
+  "track",
+  "service",
+  "path",
+  "bridleway",
+  "cycleway",
+  "footway",
+  "unclassified",
+]);
 const ROAD_TYPES = new Set([
   "motorway",
   "trunk",
@@ -238,9 +260,20 @@ export function applyPresetSpatialFilters(
         addResult(
           feature,
           "off-road",
-          isClearlyPrivate(feature) ? "Dirt road, restricted/private tag" : "Dirt road",
+          isLikelyMotorVehicleForbidden(feature) ? "Dirt road, restricted/private tag" : "Dirt road",
           undefined,
-          tagDetail(tags, ["highway", "surface", "tracktype", "smoothness", "access"]),
+          tagDetail(tags, [
+            "highway",
+            "surface",
+            "tracktype",
+            "smoothness",
+            "access",
+            "motor_vehicle",
+            "vehicle",
+            "foot",
+            "bicycle",
+            "horse",
+          ]),
         );
       }
       break;
@@ -262,14 +295,25 @@ export function applyPresetSpatialFilters(
     case "preset-01":
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
-        if (!isClearlyPrivate(road) && (isUnpavedRoad(tags) || isRoughOrHighClearanceRoad(tags))) {
+        if (!isLikelyMotorVehicleForbidden(road) && (isUnpavedRoad(tags) || isRoughOrHighClearanceRoad(tags))) {
           if (featureLengthMeters(road) < OFF_ROAD_MIN_LENGTH_METERS) continue;
           addResult(
             road,
             "off-road",
             "Public-ish off-roading / rough road",
             undefined,
-            tagDetail(tags, ["highway", "surface", "tracktype", "smoothness", "access"]),
+            tagDetail(tags, [
+              "highway",
+              "surface",
+              "tracktype",
+              "smoothness",
+              "access",
+              "motor_vehicle",
+              "vehicle",
+              "foot",
+              "bicycle",
+              "horse",
+            ]),
           );
         }
       }
@@ -278,7 +322,10 @@ export function applyPresetSpatialFilters(
     case "preset-02":
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
-        if (isClearlyRestricted(road) && (isUnpavedRoad(tags) || isRoughOrHighClearanceRoad(tags))) {
+        if (
+          (isClearlyRestricted(road) || isLikelyMotorVehicleForbidden(road)) &&
+          (isUnpavedRoad(tags) || isRoughOrHighClearanceRoad(tags))
+        ) {
           if (featureLengthMeters(road) < OFF_ROAD_MIN_LENGTH_METERS) continue;
           addResult(
             road,
@@ -541,7 +588,7 @@ export function applyPresetSpatialFilters(
       const farFromBuildings = farFromAnyPredicate(context.buildings, NO_BUILDINGS_DISTANCE_METERS);
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
-        if (!isUnpavedRoad(tags) || isClearlyPrivate(road)) continue;
+        if (!isUnpavedRoad(tags) || isLikelyMotorVehicleForbidden(road)) continue;
         applyClippedResult(road, farFromBuildings, (matched, lengthMeters, spans) => {
           if (lengthMeters < OFF_ROAD_MIN_LENGTH_METERS) return;
           addResult(
@@ -549,7 +596,7 @@ export function applyPresetSpatialFilters(
             "off-road",
             "Unpaved public-ish road with no mapped buildings nearby",
             undefined,
-            `${describeClip(lengthMeters, spans)}. ${tagDetail(tags, ["surface", "tracktype", "access", "highway"])}`,
+            `${describeClip(lengthMeters, spans)}. ${tagDetail(tags, ["surface", "tracktype", "access", "highway", "motor_vehicle", "foot", "bicycle"])}`,
           );
         });
       }
@@ -564,9 +611,22 @@ export function applyPresetSpatialFilters(
         addResult(
           road,
           "off-road",
-          isClearlyPrivate(road) ? "Rough or high-clearance road, restricted/private tag" : "Rough or high-clearance road",
+          isLikelyMotorVehicleForbidden(road)
+            ? "Rough or high-clearance road, restricted/private tag"
+            : "Rough or high-clearance road",
           undefined,
-          tagDetail(tags, ["tracktype", "smoothness", "surface", "access", "motor_vehicle", "highway"]),
+          tagDetail(tags, [
+            "tracktype",
+            "smoothness",
+            "surface",
+            "access",
+            "motor_vehicle",
+            "vehicle",
+            "foot",
+            "bicycle",
+            "horse",
+            "highway",
+          ]),
         );
       }
       break;
@@ -937,7 +997,7 @@ export function applyPresetSpatialFilters(
     case "preset-featured-off-road":
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
-        if (isClearlyPrivate(road)) continue;
+        if (isLikelyMotorVehicleForbidden(road)) continue;
         if (!isUnpavedRoad(tags) && !isRoughOrHighClearanceRoad(tags)) continue;
         if (featureLengthMeters(road) < OFF_ROAD_MIN_LENGTH_METERS) continue;
         addResult(
@@ -945,7 +1005,18 @@ export function applyPresetSpatialFilters(
           "off-road",
           "Public off-road / rough route",
           undefined,
-          tagDetail(tags, ["highway", "surface", "tracktype", "smoothness", "access"]),
+          tagDetail(tags, [
+            "highway",
+            "surface",
+            "tracktype",
+            "smoothness",
+            "access",
+            "motor_vehicle",
+            "vehicle",
+            "foot",
+            "bicycle",
+            "horse",
+          ]),
         );
       }
       break;
@@ -1680,6 +1751,36 @@ function isClearlyPrivate(feature: GeoJSONFeature): boolean {
 
 function isClearlyRestricted(feature: GeoJSONFeature): boolean {
   return hasAccessValue(getFeatureTags(feature), RESTRICTED_VALUES);
+}
+
+function hasPositiveAccess(tags: Record<string, string>, keys: readonly string[]): boolean {
+  return keys.some((key) => POSITIVE_ACCESS_VALUES.has(tags[key]?.toLowerCase() ?? ""));
+}
+
+// True when tags strongly imply motor vehicles are NOT allowed, even without
+// an explicit access=private/no. Catches the common OSM pattern of gated
+// utility/watershed corridors that enumerate foot/bicycle/horse access but
+// leave motor_vehicle unset, and also catches destination/agricultural/forestry
+// restrictions on motor_vehicle or vehicle.
+export function isLikelyMotorVehicleForbidden(feature: GeoJSONFeature): boolean {
+  const tags = getFeatureTags(feature);
+  if (hasAccessValue(tags, PRIVATE_VALUES)) return true;
+
+  for (const key of MOTOR_VEHICLE_ACCESS_KEYS) {
+    const value = tags[key]?.toLowerCase();
+    if (value && MOTOR_FORBIDDEN_VALUES.has(value)) return true;
+  }
+
+  const highway = tags.highway?.toLowerCase() ?? "";
+  if (
+    IMPLICIT_NON_MOTORIZED_HIGHWAYS.has(highway) &&
+    hasPositiveAccess(tags, NON_MOTORIZED_ACCESS_KEYS) &&
+    !hasPositiveAccess(tags, MOTOR_VEHICLE_ACCESS_KEYS)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function hasAccessValue(tags: Record<string, string>, values: Set<string>): boolean {
