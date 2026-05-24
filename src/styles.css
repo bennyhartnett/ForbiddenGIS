@@ -1698,7 +1698,7 @@ p {
 .match-browse-chip {
   position: absolute;
   right: 16px;
-  bottom: 200px;
+  bottom: 300px;
   z-index: 5;
   display: inline-flex;
   align-items: center;
@@ -2368,7 +2368,7 @@ body.street-view-resizing .street-view-canvas {
 
   .match-browse-chip {
     right: var(--mobile-edge);
-    bottom: calc(var(--mobile-edge-bottom) + 200px);
+    bottom: calc(var(--mobile-edge-bottom) + 300px);
     height: 44px;
   }
 
