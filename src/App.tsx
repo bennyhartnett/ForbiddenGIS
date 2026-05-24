@@ -288,7 +288,6 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [error, setError] = useState<string | null>(null);
   const [resultCount, setResultCount] = useState(0);
   const [rawFeatureCount, setRawFeatureCount] = useState<number | null>(null);
-  const [renderedFeatureCount, setRenderedFeatureCount] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [lastSearchDurationMs, setLastSearchDurationMs] = useState<number | null>(null);
   const [searchOutcome, setSearchOutcome] = useState<"idle" | "success" | "error">("idle");
@@ -704,7 +703,6 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     setStreetViewAvailability(new Set());
     setMatchListOpen(false);
     setResultCount(0);
-    setRenderedFeatureCount(0);
     setRawFeatureCount(null);
     setError(null);
     setSearchWarning(null);
@@ -858,7 +856,6 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       renderFeatures(newCollection);
       setRawFeatureCount(overpass.rawFeatureCount);
       setResultCount(newCollection.features.length);
-      setRenderedFeatureCount(newCollection.features.length);
       setSearchWarning(result.warnings[0] ?? null);
       const startedAt = searchStartedAtRef.current;
       if (startedAt !== null) {
@@ -1542,7 +1539,6 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           onSearch={() => void handleSearch()}
           onClear={clearResults}
           resultCount={resultCount}
-          renderedFeatureCount={renderedFeatureCount}
           elapsedMs={elapsedMs}
           lastSearchDurationMs={lastSearchDurationMs}
           searchOutcome={searchOutcome}
@@ -1968,7 +1964,6 @@ function PresetPanel(props: {
   onSearch: () => void;
   onClear: () => void;
   resultCount: number;
-  renderedFeatureCount: number;
   elapsedMs: number;
   lastSearchDurationMs: number | null;
   searchOutcome: "idle" | "success" | "error";
@@ -2055,16 +2050,6 @@ function PresetPanel(props: {
           searchOutcome={props.searchOutcome}
           resultCount={props.resultCount}
         />
-        <dl className="stats-strip">
-          <div>
-            <dt>Results</dt>
-            <dd>{props.resultCount.toLocaleString()}</dd>
-          </div>
-          <div>
-            <dt>Shown</dt>
-            <dd>{props.renderedFeatureCount.toLocaleString()}</dd>
-          </div>
-        </dl>
       </div>
       <div className="panel-actions">
         <button

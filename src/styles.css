@@ -965,36 +965,6 @@ p {
   stroke-linejoin: round;
 }
 
-.stats-strip {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 8px;
-  background: var(--surface-2);
-  border-radius: 8px;
-  border: 1px solid var(--line);
-}
-
-.stats-strip div {
-  display: grid;
-  gap: 2px;
-}
-
-.stats-strip dt {
-  font-size: 0.65rem;
-  font-weight: 500;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.stats-strip dd {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 500;
-  color: var(--ink);
-}
-
 /* ---- Search status banner ---- */
 
 .search-status {
