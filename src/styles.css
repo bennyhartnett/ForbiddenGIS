@@ -1860,12 +1860,38 @@ p {
 }
 
 .match-list-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.85rem;
   font-weight: 500;
   color: inherit;
+  min-width: 0;
+}
+
+.match-list-name-text {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.match-list-streetview-badge {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--primary, currentColor);
+}
+
+.match-list-streetview-badge svg {
+  width: 16px;
+  height: 16px;
+}
+
+.match-list-item.is-selected .match-list-streetview-badge {
+  color: var(--primary-ink);
 }
 
 .match-list-meta {
