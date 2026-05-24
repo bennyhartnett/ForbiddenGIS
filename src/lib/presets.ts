@@ -9,7 +9,7 @@ export interface PresetQueryOptions {
 
 export const PRESETS: PresetDefinition[] = [
   preset("preset-featured-off-road", "Public Off Road", "Public tracks, unpaved roads, and rough routes drivable by a 4x4 or high-clearance vehicle.", 14, true, true, false),
-  preset("preset-featured-fishing", "Fishing Spots", "Accessible fishing access — piers, slipways, boat ramps, fish passes, plus the exact points where rivers and streams cross a bridge, road, or trail.", 13, false, false, false),
+  preset("preset-featured-fishing", "Fishing Spots", "Accessible fishing access — piers, slipways, boat ramps, fish passes, plus the exact points where year-round rivers, streams, and canals cross a bridge, road, or trail. Intermittent and ephemeral waterways are excluded.", 13, false, false, false),
   preset("preset-featured-camping", "Camping Spots", "Campsites, caravan sites, camp pitches, and dispersed camping areas.", 12, false, false, false),
   preset("preset-featured-hunting", "Hunting Spots", "Hunting stands, game reserves, and tagged hunting areas with mapped access.", 12, false, false, false),
   preset("preset-featured-parking", "Public Parking", "Publicly accessible parking lots, laybys, and rest areas.", 14, false, false, false),
@@ -231,7 +231,7 @@ function fishingClauses(bbox: string): string[] {
     `way["waterway"="fish_pass"](${bbox});`,
     `way["waterway"="fishpass"](${bbox});`,
     `node["seamark:type"="fishing_facility"](${bbox});`,
-    `way["waterway"~"^(river|stream|canal|ditch|drain)$"](${bbox});`,
+    `way["waterway"~"^(river|stream|canal)$"]["intermittent"!~"^(yes|seasonal)$"]["ephemeral"!~"^yes$"]["seasonal"!~"^(yes|spring|summer|autumn|winter|wet_season|dry_season)$"](${bbox});`,
     `way["bridge"]["bridge"!~"^(no)$"](${bbox});`,
     `relation["bridge"]["bridge"!~"^(no)$"](${bbox});`,
     `nwr["man_made"="bridge"](${bbox});`,

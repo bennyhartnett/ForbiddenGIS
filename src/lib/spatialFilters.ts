@@ -174,7 +174,15 @@ const STREET_PARKING_KEYS = [
   "parking:lane:both",
 ];
 const PARKING_FORBIDDEN_PATTERN = /^(no|none|no_parking|no_stopping|fire_lane)$/i;
-const FISHABLE_WATERWAY_VALUES = new Set(["river", "stream", "canal", "ditch", "drain"]);
+const FISHABLE_WATERWAY_VALUES = new Set(["river", "stream", "canal"]);
+const DRY_WATERWAY_TAG_PATTERN = /^(yes|seasonal|spring|summer|autumn|winter|wet_season|dry_season)$/i;
+
+function isLikelyDryWaterway(tags: Record<string, string>): boolean {
+  if (tags.intermittent && DRY_WATERWAY_TAG_PATTERN.test(tags.intermittent)) return true;
+  if (tags.ephemeral && /^yes$/i.test(tags.ephemeral)) return true;
+  if (tags.seasonal && DRY_WATERWAY_TAG_PATTERN.test(tags.seasonal)) return true;
+  return false;
+}
 
 export function prepareSimpleResult(
   features: GeoJSONFeature[],
@@ -975,7 +983,9 @@ export function applyPresetSpatialFilters(
       const waterways = features.filter((feature) => {
         const tags = getFeatureTags(feature);
         return (
-          FISHABLE_WATERWAY_VALUES.has(tags.waterway ?? "") && isLineGeometry(feature.geometry)
+          FISHABLE_WATERWAY_VALUES.has(tags.waterway ?? "") &&
+          !isLikelyDryWaterway(tags) &&
+          isLineGeometry(feature.geometry)
         );
       });
 
