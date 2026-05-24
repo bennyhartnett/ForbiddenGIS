@@ -1894,6 +1894,46 @@ p {
   color: var(--primary-ink);
 }
 
+.match-list-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0 1px;
+}
+
+.match-list-surface {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.match-list-surface.is-unknown {
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+  border-color: var(--surface-2);
+}
+
+.match-list-item.is-selected .match-list-surface {
+  background: var(--surface);
+  color: var(--primary-ink);
+}
+
+.match-list-item.is-selected .match-list-surface.is-unknown {
+  background: transparent;
+  border-color: var(--surface);
+}
+
 .match-list-meta {
   font-size: 0.75rem;
   color: var(--muted);
