@@ -1591,7 +1591,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           />
         ) : null}
 
-        {selectedFeature ? (
+        {selectedFeature && streetViewState.status !== "open" ? (
           <FeatureCard
             selectedFeature={selectedFeature}
             streetViewState={streetViewState}
@@ -1661,6 +1661,11 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
                       <div>
                         <p className="eyebrow">Street view</p>
                         <h2>{streetViewState.sourceName}</h2>
+                        {selectedFeature ? (
+                          <small>{formatCoordinate(selectedFeature.coordinate)}</small>
+                        ) : coordinate ? (
+                          <small>{formatCoordinate(coordinate)}</small>
+                        ) : null}
                       </div>
                     </div>
                     <button
@@ -1673,6 +1678,16 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
                       <CloseIcon />
                     </button>
                   </div>
+                  {selectedFeature ? (
+                    <FeatureDetails
+                      selectedFeature={selectedFeature}
+                      streetViewState={streetViewState}
+                      address={streetViewAddress}
+                      resolvingAddress={resolvingAddress}
+                      showStreetViewStatus={false}
+                      className="street-view-details"
+                    />
+                  ) : null}
                   {externalLinks.length > 0 ? (
                     <div className="street-view-links external-links">
                       {externalLinks.map((link) => (
@@ -2658,6 +2673,66 @@ function FeatureCard({
         <StreetViewStatus state={streetViewState} />
       </div>
     </section>
+  );
+}
+
+function FeatureDetails({
+  selectedFeature,
+  streetViewState,
+  address,
+  resolvingAddress = false,
+  showStreetViewStatus = true,
+  className = "",
+}: {
+  selectedFeature: SelectedFeature;
+  streetViewState: StreetViewState;
+  address: string | null;
+  resolvingAddress?: boolean;
+  showStreetViewStatus?: boolean;
+  className?: string;
+}) {
+  const tagRows = summarizeTags(selectedFeature.tags, 10);
+
+  return (
+    <div className={["feature-details", className].filter(Boolean).join(" ")}>
+      {address ? (
+        <dl className="feature-card-row">
+          <dt>Address</dt>
+          <dd>{address}</dd>
+        </dl>
+      ) : resolvingAddress ? (
+        <dl className="feature-card-row">
+          <dt>Address</dt>
+          <dd className="muted">Looking up…</dd>
+        </dl>
+      ) : null}
+      <dl className="feature-card-row">
+        <dt>Match</dt>
+        <dd>
+          {selectedFeature.matchReason.label}
+          {selectedFeature.matchReason.distanceMeters !== undefined
+            ? ` · ${formatMetersForUi(selectedFeature.matchReason.distanceMeters)}`
+            : ""}
+        </dd>
+      </dl>
+      {selectedFeature.matchReason.lengthMeters !== undefined ? (
+        <dl className="feature-card-row">
+          <dt>Length</dt>
+          <dd>{formatLengthImperial(selectedFeature.matchReason.lengthMeters)}</dd>
+        </dl>
+      ) : null}
+      {selectedFeature.matchReason.detail ? (
+        <p className="feature-detail-note">{selectedFeature.matchReason.detail}</p>
+      ) : null}
+      {tagRows.length > 0 ? (
+        <ul className="tag-list">
+          {tagRows.map((tag) => (
+            <li key={tag}>{tag}</li>
+          ))}
+        </ul>
+      ) : null}
+      {showStreetViewStatus ? <StreetViewStatus state={streetViewState} /> : null}
+    </div>
   );
 }
 
