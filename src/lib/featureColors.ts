@@ -148,7 +148,29 @@ export const HIGH_CONTRAST_PALETTE: readonly string[] = [
 ];
 
 const PRIVATE_ACCESS_VALUES = new Set(["private", "no", "customers", "permit", "destination"]);
+const MOTOR_RESTRICTED_VALUES = new Set([
+  "private",
+  "no",
+  "customers",
+  "permit",
+  "destination",
+  "agricultural",
+  "forestry",
+  "delivery",
+]);
+const POSITIVE_ACCESS_VALUES = new Set(["yes", "designated", "permissive", "official"]);
 const ACCESS_FIELDS = ["access", "vehicle", "motor_vehicle", "motorcar", "foot", "bicycle"];
+const MOTOR_ACCESS_FIELDS = ["motor_vehicle", "vehicle", "motorcar"];
+const NON_MOTORIZED_ACCESS_FIELDS = ["foot", "bicycle", "horse"];
+const IMPLICIT_NON_MOTORIZED_HIGHWAYS = new Set([
+  "track",
+  "service",
+  "path",
+  "bridleway",
+  "cycleway",
+  "footway",
+  "unclassified",
+]);
 
 export type AccessClass = "public" | "private";
 
@@ -159,6 +181,30 @@ export function classifyAccess(tags: Record<string, string>): AccessClass {
       return "private";
     }
   }
+
+  for (const field of MOTOR_ACCESS_FIELDS) {
+    const value = (tags[field] ?? "").toLowerCase();
+    if (value && MOTOR_RESTRICTED_VALUES.has(value)) {
+      return "private";
+    }
+  }
+
+  // Implicit deny: tagger enumerated non-motorized users on a track-like way
+  // but never granted motor_vehicle/vehicle access. Treat as private for the
+  // off-road/road colouring so gated foot/bike corridors aren't shown blue.
+  const highway = (tags.highway ?? "").toLowerCase();
+  if (IMPLICIT_NON_MOTORIZED_HIGHWAYS.has(highway)) {
+    const nonMotorizedGranted = NON_MOTORIZED_ACCESS_FIELDS.some((field) =>
+      POSITIVE_ACCESS_VALUES.has((tags[field] ?? "").toLowerCase()),
+    );
+    const motorGranted = MOTOR_ACCESS_FIELDS.some((field) =>
+      POSITIVE_ACCESS_VALUES.has((tags[field] ?? "").toLowerCase()),
+    );
+    if (nonMotorizedGranted && !motorGranted) {
+      return "private";
+    }
+  }
+
   return "public";
 }
 
