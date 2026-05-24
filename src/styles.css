@@ -2315,6 +2315,40 @@ body.street-view-resizing .street-view-canvas {
   min-height: 0;
 }
 
+.street-view-empty {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 32px 20px;
+  text-align: center;
+  background: var(--surface-muted, var(--surface));
+  border-top: 1px solid var(--line);
+}
+
+.street-view-empty .street-view-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--line);
+  color: var(--muted);
+}
+
+.street-view-empty .street-view-empty-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.street-view-empty .notice {
+  margin: 0;
+  max-width: 32ch;
+}
+
 /* ---- Panel toggle (compact mode) ---- */
 
 .panel-toggle {

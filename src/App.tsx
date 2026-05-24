@@ -1422,7 +1422,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   );
 
   useEffect(() => {
-    if (streetViewState.status !== "open" && streetViewWidth !== null) {
+    if (streetViewState.status === "idle" && streetViewWidth !== null) {
       setStreetViewWidth(null);
     }
   }, [streetViewState.status, streetViewWidth]);
@@ -1642,14 +1642,14 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
             onPrev={() => cycleMatch(-1)}
             onNext={() => cycleMatch(1)}
             rightOffset={
-              streetViewState.status === "open" && streetViewWidth !== null
+              streetViewState.status !== "idle" && streetViewWidth !== null
                 ? streetViewWidth + 16
                 : 16
             }
           />
         ) : null}
 
-        {selectedFeature && streetViewState.status !== "open" ? (
+        {selectedFeature && streetViewState.status === "idle" ? (
           <FeatureCard
             selectedFeature={selectedFeature}
             streetViewState={streetViewState}
@@ -1672,9 +1672,12 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           />
         ) : null}
 
-        {streetViewState.status === "open"
+        {streetViewState.status !== "idle"
           ? (() => {
-              const panoLatLng = streetViewState.data.location?.latLng;
+              const isOpen = streetViewState.status === "open";
+              const panoLatLng = isOpen
+                ? streetViewState.data.location?.latLng ?? null
+                : null;
               const coordinate: LatLng | null = panoLatLng
                 ? { lat: panoLatLng.lat(), lng: panoLatLng.lng() }
                 : selectedFeature?.coordinate ?? null;
@@ -1729,7 +1732,15 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
                     <button
                       type="button"
                       className="icon-button street-view-close"
-                      onClick={closeStreetView}
+                      onClick={() => {
+                        setSelectedFeature(null);
+                        selectedDataFeatureRef.current?.setProperty(
+                          "scoutSelected",
+                          false,
+                        );
+                        selectedDataFeatureRef.current = null;
+                        closeStreetView();
+                      }}
                       aria-label="Close street view"
                       title="Close"
                     >
@@ -1761,13 +1772,28 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
                       ))}
                     </div>
                   ) : null}
-                  <StreetViewTimeSlider
-                    entries={panoHistory}
-                    activeIndex={panoHistoryIndex}
-                    onChange={handlePanoHistoryChange}
-                    fallbackDate={streetViewState.data.imageDate}
-                  />
-                  <div ref={streetViewDivRef} className="street-view-canvas" />
+                  {isOpen ? (
+                    <>
+                      <StreetViewTimeSlider
+                        entries={panoHistory}
+                        activeIndex={panoHistoryIndex}
+                        onChange={handlePanoHistoryChange}
+                        fallbackDate={streetViewState.data.imageDate}
+                      />
+                      <div ref={streetViewDivRef} className="street-view-canvas" />
+                    </>
+                  ) : (
+                    <div
+                      className="street-view-empty"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <span className="street-view-empty-icon" aria-hidden="true">
+                        <PegmanIcon />
+                      </span>
+                      <StreetViewStatus state={streetViewState} />
+                    </div>
+                  )}
                 </section>
               );
             })()
