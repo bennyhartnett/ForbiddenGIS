@@ -3809,7 +3809,7 @@ function validateSearchGate(
     return null;
   }
   if (zoom < presetMinZoom) {
-    return `This preset query requires zoom level ${presetMinZoom} or closer. Zoom in to continue.`;
+    return "Please zoom in";
   }
   return null;
 }
