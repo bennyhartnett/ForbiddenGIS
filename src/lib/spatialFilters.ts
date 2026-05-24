@@ -51,6 +51,7 @@ export const DEAD_END_TO_TRAIL_DISTANCE_METERS = 25;
 export const LOW_SPEED_MPH_VALUES = [25, 30] as const;
 export const TREE_LINED_REQUIRED_METERS = 30.48;
 export const TREE_CONTEXT_DISTANCE_METERS = 15;
+export const OFF_ROAD_MIN_LENGTH_METERS = 30.48;
 
 const PRIVATE_VALUES = new Set(["private", "no", "customers", "permit"]);
 const RESTRICTED_VALUES = new Set(["private", "no", "customers", "permit", "destination"]);
@@ -220,6 +221,7 @@ export function applyPresetSpatialFilters(
         const tags = getFeatureTags(feature);
         if (!tags.highway || !isDirtRoad(tags)) continue;
         if (!isCarDrivable(tags)) continue;
+        if (featureLengthMeters(feature) < OFF_ROAD_MIN_LENGTH_METERS) continue;
         addResult(
           feature,
           "off-road",
@@ -248,6 +250,7 @@ export function applyPresetSpatialFilters(
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isClearlyPrivate(road) && (isUnpavedRoad(tags) || isRoughOrHighClearanceRoad(tags))) {
+          if (featureLengthMeters(road) < OFF_ROAD_MIN_LENGTH_METERS) continue;
           addResult(
             road,
             "off-road",
@@ -263,6 +266,7 @@ export function applyPresetSpatialFilters(
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (isClearlyRestricted(road) && (isUnpavedRoad(tags) || isRoughOrHighClearanceRoad(tags))) {
+          if (featureLengthMeters(road) < OFF_ROAD_MIN_LENGTH_METERS) continue;
           addResult(
             road,
             "off-road",
@@ -526,6 +530,7 @@ export function applyPresetSpatialFilters(
         const tags = getFeatureTags(road);
         if (!isUnpavedRoad(tags) || isClearlyPrivate(road)) continue;
         applyClippedResult(road, farFromBuildings, (matched, lengthMeters, spans) => {
+          if (lengthMeters < OFF_ROAD_MIN_LENGTH_METERS) return;
           addResult(
             matched,
             "off-road",
@@ -542,6 +547,7 @@ export function applyPresetSpatialFilters(
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isRoughOrHighClearanceRoad(tags)) continue;
+        if (featureLengthMeters(road) < OFF_ROAD_MIN_LENGTH_METERS) continue;
         addResult(
           road,
           "off-road",
@@ -920,6 +926,7 @@ export function applyPresetSpatialFilters(
         const tags = getFeatureTags(road);
         if (isClearlyPrivate(road)) continue;
         if (!isUnpavedRoad(tags) && !isRoughOrHighClearanceRoad(tags)) continue;
+        if (featureLengthMeters(road) < OFF_ROAD_MIN_LENGTH_METERS) continue;
         addResult(
           road,
           "off-road",
@@ -1825,6 +1832,13 @@ function extractLineStrings(geometry: Geometry): Position[][] {
   if (geometry.type === "LineString") return [geometry.coordinates];
   if (geometry.type === "MultiLineString") return geometry.coordinates;
   return [];
+}
+
+function featureLengthMeters(feature: GeoJSONFeature): number {
+  const lines = extractLineStrings(feature.geometry);
+  let total = 0;
+  for (const line of lines) total += lineLengthMeters(line);
+  return total;
 }
 
 function countTrailRoadIntersections(
