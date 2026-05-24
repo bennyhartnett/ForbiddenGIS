@@ -10,7 +10,7 @@ export interface PresetQueryOptions {
 export const PRESETS: PresetDefinition[] = [
   preset("preset-featured-off-road", "Public Off Road", "Public tracks, unpaved roads, and rough routes drivable by a 4x4 or high-clearance vehicle.", 14, true, true, false),
   preset("preset-featured-fishing", "Fishing Spots", "Mapped fishing access — fishing-tagged piers, slipways, fish passes, and any feature tagged for angling.", 13, false, false, true),
-  preset("preset-featured-camping", "Camping Spots", "Campsites, caravan sites, camp pitches, and dispersed camping areas.", 12, false, false, false),
+  preset("preset-featured-camping", "Camping Spots", "Established campsites plus public lands where boondocking is allowed (BLM, National Forests, state forests, WMAs). Each result is annotated with that state's boondocking rules.", 10, false, false, false),
   preset("preset-featured-hunting", "Hunting Spots", "Hunting stands, game reserves, and tagged hunting areas with mapped access.", 12, false, false, false),
   preset("preset-featured-parking", "Public Parking", "Publicly accessible parking lots, laybys, and rest areas.", 14, false, false, false),
   preset("preset-dirt-roads", "Dirt & Gravel Roads", "Tracks with gravel, dirt, sand, grass, or graded unpaved surfaces drivable by a Jeep or similar 4x4.", 14, false, false, false),
@@ -237,6 +237,22 @@ function campingClauses(bbox: string): string[] {
     `nwr["tourism"="wilderness_hut"](${bbox});`,
     `nwr["amenity"="shelter"]["shelter_type"~"^(basic_hut|lean_to|weather_shelter)$"](${bbox});`,
     `nwr["leisure"="dispersed_camping"](${bbox});`,
+    `way["boundary"="protected_area"]["operator"~"Bureau of Land Management|BLM",i](${bbox});`,
+    `relation["boundary"="protected_area"]["operator"~"Bureau of Land Management|BLM",i](${bbox});`,
+    `way["boundary"="protected_area"]["operator"~"Forest Service|USFS",i](${bbox});`,
+    `relation["boundary"="protected_area"]["operator"~"Forest Service|USFS",i](${bbox});`,
+    `way["boundary"="protected_area"]["protect_class"="6"](${bbox});`,
+    `relation["boundary"="protected_area"]["protect_class"="6"](${bbox});`,
+    `way["boundary"="protected_area"]["protect_class"~"^(4|14)$"](${bbox});`,
+    `relation["boundary"="protected_area"]["protect_class"~"^(4|14)$"](${bbox});`,
+    `way["boundary"="national_park"](${bbox});`,
+    `relation["boundary"="national_park"](${bbox});`,
+    `way["name"~"National Forest|National Grassland",i](${bbox});`,
+    `relation["name"~"National Forest|National Grassland",i](${bbox});`,
+    `way["name"~"State Forest",i](${bbox});`,
+    `relation["name"~"State Forest",i](${bbox});`,
+    `way["name"~"Wildlife Management Area",i](${bbox});`,
+    `relation["name"~"Wildlife Management Area",i](${bbox});`,
   ];
 }
 

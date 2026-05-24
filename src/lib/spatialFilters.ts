@@ -30,6 +30,12 @@ import {
   getOsmId,
   representativeCoordinate,
 } from "./geo";
+import {
+  classifyBoondockLand,
+  getStateBoondockingRules,
+  labelForBoondockLand,
+  summarizeStateRules,
+} from "./boondockRules";
 
 export interface SpatialFilterOptions {
   includeBuildings: boolean;
@@ -969,13 +975,33 @@ export function applyPresetSpatialFilters(
     case "preset-featured-camping":
       for (const feature of features) {
         const tags = getFeatureTags(feature);
-        if (!isCampingFeature(tags)) continue;
+        const kind = classifyBoondockLand(tags);
+        if (!kind) continue;
+        if (kind === "state_park" && isRestrictedAccess(tags.access)) continue;
+
+        const coord = representativeCoordinate(feature);
+        const stateRules = getStateBoondockingRules(coord);
+        const stateSummary = stateRules ? summarizeStateRules(stateRules, kind) : null;
+        const tagSummary = tagDetail(tags, [
+          "tourism",
+          "leisure",
+          "amenity",
+          "boundary",
+          "protect_class",
+          "operator",
+          "ownership",
+          "shelter_type",
+          "name",
+          "access",
+        ]);
+        const detail = stateSummary ? `${stateSummary} — ${tagSummary}` : tagSummary;
+
         addResult(
           feature,
-          "park",
-          "Camping spot",
+          campingCategoryFor(kind),
+          labelForBoondockLand(kind),
           undefined,
-          tagDetail(tags, ["tourism", "leisure", "amenity", "shelter_type", "name", "access"]),
+          detail,
         );
       }
       break;
@@ -1157,16 +1183,7 @@ export function classifyFishingFeature(tags: Record<string, string>): string {
 }
 
 export function isCampingFeature(tags: Record<string, string>): boolean {
-  const tourism = tags.tourism;
-  if (tourism === "camp_site" || tourism === "caravan_site" || tourism === "camp_pitch" || tourism === "wilderness_hut") {
-    return true;
-  }
-  if (tags.leisure === "dispersed_camping") return true;
-  if (tags.amenity === "shelter") {
-    const type = tags.shelter_type;
-    if (type === "basic_hut" || type === "lean_to" || type === "weather_shelter") return true;
-  }
-  return false;
+  return classifyBoondockLand(tags) !== null;
 }
 
 export function isHuntingFeature(tags: Record<string, string>): boolean {
@@ -2019,4 +2036,17 @@ function tagDetail(tags: Record<string, string>, keys: string[]): string {
 
 function parkingDetail(tags: Record<string, string>): string {
   return tagDetail(tags, [...STREET_PARKING_KEYS, "access"]);
+}
+
+function campingCategoryFor(
+  kind: ReturnType<typeof classifyBoondockLand>,
+): ScoutCategory {
+  switch (kind) {
+    case "national_forest":
+    case "state_forest":
+    case "nature_reserve":
+      return "woods";
+    default:
+      return "park";
+  }
 }
