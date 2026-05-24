@@ -411,7 +411,7 @@ p {
   display: flex;
   flex-direction: column;
   max-height: calc(100vh - 88px);
-  overflow-y: auto;
+  overflow: hidden;
   overscroll-behavior: contain;
 }
 
@@ -472,6 +472,9 @@ p {
 }
 
 .panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 12px 14px 16px;
 }
 
