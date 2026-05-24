@@ -20,6 +20,7 @@ export type FeatureKind =
   | "railway"
   | "weather-station"
   | "restricted-area"
+  | "private-parcel"
   | "simple"
   | "context-road"
   | "context-parking"
@@ -74,6 +75,7 @@ export const FEATURE_KINDS: FeatureKindMeta[] = [
   { kind: "railway", label: "Railways / train tracks", group: "result" },
   { kind: "weather-station", label: "Weather stations", group: "result" },
   { kind: "restricted-area", label: "Restricted / private areas", group: "result" },
+  { kind: "private-parcel", label: "Private parcels", group: "result" },
   { kind: "simple", label: "Other matches", group: "result" },
   { kind: "context-road", label: "Roads (context)", group: "context" },
   { kind: "context-parking", label: "Parking (context)", group: "context" },
@@ -118,6 +120,7 @@ export const DEFAULT_FEATURE_COLORS: Record<FeatureKind, string> = {
   railway: DEFAULT_ORANGE,
   "weather-station": "#1a73e8",
   "restricted-area": "#d93025",
+  "private-parcel": "#a0522d",
   simple: DEFAULT_ORANGE,
   "context-road": "#5f6368",
   "context-parking": "#8430ce",
@@ -224,6 +227,8 @@ export function featureKindFor(
       return "weather-station";
     case "restricted":
       return "restricted-area";
+    case "private-parcel":
+      return "private-parcel";
     case "simple":
     default:
       return "simple";

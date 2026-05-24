@@ -52,6 +52,7 @@ export const PRESETS: PresetDefinition[] = [
   preset("preset-35", "Unfenced Train Tracks", "Active railway tracks with no mapped fence or wall within ~30 m.", 14, true, false, false),
   preset("preset-weather", "Weather Stations", "OSM-tagged weather stations plus nearby official NWS observation stations (US only).", 8, false, false, false),
   preset("preset-restricted", "Restricted & Private Areas", "Military bases, gated communities, prisons, embassies, and other tagged no-entry zones. Overlay alongside other searches to spot land you can't drive into.", 12, false, false, false),
+  preset("preset-private-parcels", "Private Parcels", "Shades all likely-private land — residential neighborhoods, farmland, orchards, vineyards, pastures, industrial, commercial, and retail land. Overlay to see what's not public.", 13, false, false, false),
 ];
 
 export function getPresetById(id: PresetId): PresetDefinition {
@@ -209,6 +210,8 @@ function presetClauses(
       return weatherStationClauses(boxes.bbox);
     case "preset-restricted":
       return restrictedAreaClauses(boxes.bbox);
+    case "preset-private-parcels":
+      return privateParcelClauses(boxes.bbox);
   }
 }
 
@@ -278,6 +281,15 @@ function restrictedAreaClauses(bbox: string): string[] {
     `relation["residential"="gated"](${bbox});`,
     `way["landuse"~"^(industrial|government|institutional|commercial)$"]["access"~"^(no|private|customers|permit)$"](${bbox});`,
     `relation["landuse"~"^(industrial|government|institutional|commercial)$"]["access"~"^(no|private|customers|permit)$"](${bbox});`,
+  ];
+}
+
+function privateParcelClauses(bbox: string): string[] {
+  const privateLanduse = `^(residential|farmland|farmyard|orchard|vineyard|meadow|industrial|commercial|retail|allotments|plant_nursery|animal_keeping|garages|brownfield|construction|quarry)$`;
+  const publicAccess = `^(yes|public|permissive)$`;
+  return [
+    `way["landuse"~"${privateLanduse}"]["access"!~"${publicAccess}"](${bbox});`,
+    `relation["landuse"~"${privateLanduse}"]["access"!~"${publicAccess}"](${bbox});`,
   ];
 }
 

@@ -61,7 +61,8 @@ export type ScoutCategory =
   | "off-road"
   | "railway"
   | "weather-station"
-  | "restricted";
+  | "restricted"
+  | "private-parcel";
 
 export interface ScoutFeatureProperties {
   [key: string]: unknown;
@@ -141,7 +142,8 @@ export type PresetId =
   | "preset-featured-hunting"
   | "preset-featured-parking"
   | "preset-weather"
-  | "preset-restricted";
+  | "preset-restricted"
+  | "preset-private-parcels";
 
 export interface PresetDefinition {
   id: PresetId;
