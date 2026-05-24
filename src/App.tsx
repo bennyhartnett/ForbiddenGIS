@@ -301,6 +301,9 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [resolvingAddress, setResolvingAddress] = useState(false);
   const addressCacheRef = useRef(new Map<string, string | null>());
   const [resultFeatures, setResultFeatures] = useState<SelectedFeature[]>([]);
+  const [streetViewAvailability, setStreetViewAvailability] = useState<Set<string>>(
+    new Set(),
+  );
   const [matchListOpen, setMatchListOpen] = useState(false);
   const [pegmanMode, setPegmanMode] = useState(false);
   const pegmanMapClickListenerRef = useRef<google.maps.MapsEventListener | null>(null);
@@ -632,10 +635,63 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         );
         if (summary) matches.push(summary);
       }
+      matches.sort((a, b) => {
+        const aLen = a.matchReason.lengthMeters;
+        const bLen = b.matchReason.lengthMeters;
+        if (aLen === undefined && bLen === undefined) return 0;
+        if (aLen === undefined) return 1;
+        if (bLen === undefined) return -1;
+        return bLen - aLen;
+      });
+      setStreetViewAvailability(new Set());
       setResultFeatures(matches);
     },
     [clearDataLayer],
   );
+
+  useEffect(() => {
+    if (resultFeatures.length === 0) return;
+    const maps = mapsRef.current;
+    const service = streetViewServiceRef.current;
+    if (!maps || !service) return;
+
+    let cancelled = false;
+    const queue = [...resultFeatures];
+    const concurrency = 4;
+
+    const worker = async () => {
+      while (!cancelled) {
+        const match = queue.shift();
+        if (!match) return;
+        try {
+          const panorama = await findNearestStreetView(
+            maps,
+            service,
+            match.coordinate,
+          );
+          if (cancelled || !panorama) continue;
+          setStreetViewAvailability((prev) => {
+            if (prev.has(match.scoutId)) return prev;
+            const next = new Set(prev);
+            next.add(match.scoutId);
+            return next;
+          });
+        } catch {
+          // Ignore lookup errors for availability probing.
+        }
+      }
+    };
+
+    void Promise.all(
+      Array.from({ length: Math.min(concurrency, resultFeatures.length) }, () =>
+        worker(),
+      ),
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resultFeatures]);
 
   const clearResults = useCallback(() => {
     abortRef.current?.abort();
@@ -645,6 +701,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     closeStreetView();
     setSelectedFeature(null);
     setResultFeatures([]);
+    setStreetViewAvailability(new Set());
     setMatchListOpen(false);
     setResultCount(0);
     setRenderedFeatureCount(0);
@@ -1579,6 +1636,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           <MatchListPanel
             matches={resultFeatures}
             selectedId={selectedFeature?.scoutId ?? null}
+            streetViewAvailability={streetViewAvailability}
             onSelect={focusMatch}
             onClose={() => setMatchListOpen(false)}
             onPrev={() => cycleMatch(-1)}
@@ -2658,6 +2716,10 @@ function FeatureCard({
             <dd>{formatLengthImperial(selectedFeature.matchReason.lengthMeters)}</dd>
           </dl>
         ) : null}
+        <dl className="feature-card-row">
+          <dt>Surface</dt>
+          <dd>{describeSurface(selectedFeature.tags) ?? "Not tagged"}</dd>
+        </dl>
         {selectedFeature.matchReason.detail ? (
           <p style={{ color: "var(--muted)", fontSize: "0.78rem", margin: 0 }}>
             {selectedFeature.matchReason.detail}
@@ -2741,6 +2803,7 @@ function FeatureDetails({
 function MatchListPanel({
   matches,
   selectedId,
+  streetViewAvailability,
   onSelect,
   onClose,
   onPrev,
@@ -2749,6 +2812,7 @@ function MatchListPanel({
 }: {
   matches: SelectedFeature[];
   selectedId: string | null;
+  streetViewAvailability: Set<string>;
   onSelect: (match: SelectedFeature) => void;
   onClose: () => void;
   onPrev: () => void;
@@ -2807,6 +2871,8 @@ function MatchListPanel({
       <ol className="match-list">
         {matches.map((match, index) => {
           const isSelected = match.scoutId === selectedId;
+          const hasStreetView = streetViewAvailability.has(match.scoutId);
+          const surfaceLabel = describeSurface(match.tags);
           return (
             <li key={match.scoutId}>
               <button
@@ -2818,7 +2884,30 @@ function MatchListPanel({
               >
                 <span className="match-list-index">{index + 1}</span>
                 <span className="match-list-body">
-                  <span className="match-list-name">{match.name}</span>
+                  <span className="match-list-name">
+                    <span className="match-list-name-text">{match.name}</span>
+                    {hasStreetView ? (
+                      <span
+                        className="match-list-streetview-badge"
+                        aria-label="Street view available"
+                        title="Street view available"
+                      >
+                        <PegmanIcon />
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="match-list-tags">
+                    <span
+                      className={`match-list-surface${surfaceLabel ? "" : " is-unknown"}`}
+                      title={
+                        surfaceLabel
+                          ? `Surface: ${surfaceLabel}`
+                          : "Surface not tagged"
+                      }
+                    >
+                      {surfaceLabel ?? "Surface unknown"}
+                    </span>
+                  </span>
                   <span className="match-list-meta">
                     {match.matchReason.label}
                     {match.matchReason.distanceMeters !== undefined
@@ -3891,6 +3980,27 @@ function formatLengthImperial(meters: number): string {
   if (feet < 1000) return `${Math.round(feet)} ft`;
   const miles = feet / 5280;
   return miles < 10 ? `${miles.toFixed(2)} mi` : `${miles.toFixed(1)} mi`;
+}
+
+function describeSurface(tags: Record<string, string>): string | null {
+  const raw = tags.surface ?? tags.tracktype;
+  if (!raw) return null;
+  const parts = raw
+    .split(/[;,]/)
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  if (parts.length === 0) return null;
+  return parts.map(humanizeSurfaceValue).join(" / ");
+}
+
+function humanizeSurfaceValue(value: string): string {
+  if (/^grade[1-5]$/.test(value)) {
+    return value.replace("grade", "Grade ");
+  }
+  return value
+    .split("_")
+    .map((piece) => (piece ? piece[0].toUpperCase() + piece.slice(1) : piece))
+    .join(" ");
 }
 
 function normalizeMapTypeId(mapTypeId: string | undefined): MapDisplayType {
