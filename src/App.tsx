@@ -257,7 +257,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     () => cachedMapViewRef.current?.zoom ?? DEFAULT_ZOOM,
   );
   const [mapType, setMapType] = useState<MapDisplayType>(
-    () => cachedMapViewRef.current?.mapType ?? "roadmap",
+    () => cachedMapViewRef.current?.mapType ?? "hybrid",
   );
   const [mapTheme, setMapTheme] = useState<ThemeId>("default");
   const [tiltOn, setTiltOn] = useState(false);
@@ -1122,7 +1122,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         const map = new maps.maps.Map(mapDivRef.current, {
           center: cachedView?.center ?? DEFAULT_CENTER,
           zoom: cachedView?.zoom ?? DEFAULT_ZOOM,
-          mapTypeId: cachedView?.mapType ?? "roadmap",
+          mapTypeId: cachedView?.mapType ?? "hybrid",
           disableDefaultUI: true,
           zoomControl: false,
           mapTypeControl: false,
