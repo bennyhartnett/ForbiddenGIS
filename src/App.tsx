@@ -3771,7 +3771,7 @@ function validateSearchGate(
       const parsed = parseTagFilter(tagFilter);
       const minZoom = parsed.wildcard ? 13 : 12;
       if (zoom < minZoom) {
-        return `Zoom in to at least ${minZoom} before running this simple search.`;
+        return `This simple search requires zoom level ${minZoom} or closer. Zoom in to continue.`;
       }
     } catch {
       return null;
@@ -3779,11 +3779,11 @@ function validateSearchGate(
     return null;
   }
   if (mode === "raw") {
-    if (zoom < 13) return "Zoom in to at least 13 before running a custom query.";
+    if (zoom < 13) return "Custom queries require zoom level 13 or closer. Zoom in to continue.";
     return null;
   }
   if (zoom < presetMinZoom) {
-    return `Zoom in to at least ${presetMinZoom} before running this premade query.`;
+    return `This preset query requires zoom level ${presetMinZoom} or closer. Zoom in to continue.`;
   }
   return null;
 }
