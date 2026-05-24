@@ -3532,6 +3532,12 @@ function PresetGlyph({ presetId }: { presetId: PresetId }) {
           <path d="M5 5l14 14" />
         </svg>
       );
+    case "preset-private-parcels":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 5h6v6H4zM14 5h6v6h-6zM4 13h6v6H4zM14 13h6v6h-6z" />
+        </svg>
+      );
   }
 }
 
@@ -4132,9 +4138,10 @@ function styleForDataFeature(
     category === "building" ||
     category === "water" ||
     category === "parking" ||
-    category === "restricted";
+    category === "restricted" ||
+    category === "private-parcel";
 
-  const isRestricted = category === "restricted";
+  const isRestricted = category === "restricted" || category === "private-parcel";
 
   return {
     clickable: true,

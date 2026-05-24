@@ -1137,6 +1137,21 @@ export function applyPresetSpatialFilters(
         );
       }
       break;
+
+    case "preset-private-parcels":
+      for (const feature of features) {
+        const tags = getFeatureTags(feature);
+        const label = classifyPrivateParcel(tags);
+        if (!label) continue;
+        addResult(
+          feature,
+          "private-parcel",
+          label,
+          undefined,
+          tagDetail(tags, ["name", "operator", "landuse", "access", "owner"]),
+        );
+      }
+      break;
   }
 
   if (options.includeWater) {
@@ -1308,6 +1323,54 @@ export function classifyRestrictedArea(
 function isRestrictedAccess(value?: string): boolean {
   if (!value) return false;
   return ["no", "private", "customers", "permit"].includes(value.toLowerCase());
+}
+
+const PRIVATE_PARCEL_LANDUSE = new Set([
+  "residential",
+  "farmland",
+  "farmyard",
+  "orchard",
+  "vineyard",
+  "meadow",
+  "industrial",
+  "commercial",
+  "retail",
+  "allotments",
+  "plant_nursery",
+  "animal_keeping",
+  "garages",
+  "brownfield",
+  "construction",
+  "quarry",
+]);
+
+const PRIVATE_PARCEL_LABELS: Record<string, string> = {
+  residential: "Residential land",
+  farmland: "Farmland",
+  farmyard: "Farmyard",
+  orchard: "Orchard",
+  vineyard: "Vineyard",
+  meadow: "Meadow / pasture",
+  industrial: "Industrial land",
+  commercial: "Commercial land",
+  retail: "Retail land",
+  allotments: "Allotments",
+  plant_nursery: "Plant nursery",
+  animal_keeping: "Animal keeping",
+  garages: "Garages",
+  brownfield: "Brownfield",
+  construction: "Construction site",
+  quarry: "Quarry",
+};
+
+const PUBLIC_ACCESS_VALUES = new Set(["yes", "public", "permissive"]);
+
+export function classifyPrivateParcel(tags: Record<string, string>): string | null {
+  const landuse = tags.landuse?.toLowerCase();
+  if (!landuse || !PRIVATE_PARCEL_LANDUSE.has(landuse)) return null;
+  const access = tags.access?.toLowerCase();
+  if (access && PUBLIC_ACCESS_VALUES.has(access)) return null;
+  return PRIVATE_PARCEL_LABELS[landuse] ?? `${landuse.charAt(0).toUpperCase()}${landuse.slice(1)} land`;
 }
 
 export function isCarDrivable(tags: Record<string, string>): boolean {
