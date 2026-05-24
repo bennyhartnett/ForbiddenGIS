@@ -270,7 +270,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [presentFeatureKinds, setPresentFeatureKinds] = useState<ReadonlySet<FeatureKind>>(
     () => new Set<FeatureKind>(),
   );
-  const [gibsDate, setGibsDate] = useState<string>(() => formatGibsDate(new Date()));
+  const [gibsDate, setGibsDate] = useState<string>(() => latestAvailableGibsDate());
   const [visibleDiagonalKm, setVisibleDiagonalKm] = useState<number | null>(null);
   const [showSearchHereChip, setShowSearchHereChip] = useState(false);
 
@@ -1155,8 +1155,9 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       setGibsDate((prev) => {
         const next = new Date(prev + "T00:00:00Z");
         next.setUTCDate(next.getUTCDate() + days);
-        const today = new Date();
-        if (next.getTime() > today.getTime()) return formatGibsDate(today);
+        const latest = latestAvailableGibsDate();
+        const latestTime = new Date(latest + "T00:00:00Z").getTime();
+        if (next.getTime() > latestTime) return latest;
         const min = new Date(GIBS_MIN_DATE + "T00:00:00Z");
         if (next.getTime() < min.getTime()) return GIBS_MIN_DATE;
         return formatGibsDate(next);
@@ -1607,7 +1608,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           <TimeDock
             value={gibsDate}
             min={GIBS_MIN_DATE}
-            max={formatGibsDate(new Date())}
+            max={latestAvailableGibsDate()}
             sourceLabel={overlaySource.shortLabel}
             onChange={setGibsDate}
             onNudge={handleNudgeDate}
@@ -3588,6 +3589,12 @@ function formatGibsDate(date: Date): string {
   const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(date.getUTCDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function latestAvailableGibsDate(): string {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - 1);
+  return formatGibsDate(date);
 }
 
 function extractPanoHistory(data: google.maps.StreetViewPanoramaData): PanoEntry[] {
