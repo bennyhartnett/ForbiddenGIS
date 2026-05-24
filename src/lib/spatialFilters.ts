@@ -188,12 +188,14 @@ export function prepareSimpleResult(
   features: GeoJSONFeature[],
   options: SpatialFilterOptions,
 ): PresetResult {
-  const prepared = features.map((feature, index) =>
-    attachScoutMetadata(feature, index, "result", categoryForFeature(feature), {
-      label: options.simpleMatchLabel ?? "Matched simple tag search",
-      category: categoryForFeature(feature),
-    }),
-  );
+  const prepared = features
+    .map((feature, index) =>
+      attachScoutMetadata(feature, index, "result", categoryForFeature(feature), {
+        label: options.simpleMatchLabel ?? "Matched simple tag search",
+        category: categoryForFeature(feature),
+      }),
+    )
+    .filter((feature): feature is GeoJSONFeature => feature !== null);
 
   return capFeatures(prepared, prepared.length, options.renderLimit);
 }
@@ -217,15 +219,14 @@ export function applyPresetSpatialFilters(
     const lengthMeters = isLineGeometry(feature.geometry)
       ? featureLengthMeters(feature)
       : undefined;
-    resultFeatures.push(
-      attachScoutMetadata(feature, resultFeatures.length, "result", category, {
-        label,
-        distanceMeters,
-        lengthMeters,
-        detail,
-        category,
-      }),
-    );
+    const enriched = attachScoutMetadata(feature, resultFeatures.length, "result", category, {
+      label,
+      distanceMeters,
+      lengthMeters,
+      detail,
+      category,
+    });
+    if (enriched) resultFeatures.push(enriched);
   };
 
   switch (preset.id) {
@@ -1578,7 +1579,8 @@ function addContexts(
   label: string,
 ): void {
   for (const [index, feature] of features.entries()) {
-    target.push(tagContext(feature, index, role, category, label));
+    const tagged = tagContext(feature, index, role, category, label);
+    if (tagged) target.push(tagged);
   }
 }
 
@@ -1588,7 +1590,7 @@ function tagContext(
   role: ScoutRole,
   category: ScoutCategory,
   label: string,
-): GeoJSONFeature {
+): GeoJSONFeature | null {
   return attachScoutMetadata(feature, index, role, category, { label, category });
 }
 
@@ -1954,6 +1956,7 @@ function distanceToLineishFeatureMeters(
   }
 
   const center = representativeCoordinate(feature);
+  if (!center) return Number.POSITIVE_INFINITY;
   return distance(pointFeature, [center.lng, center.lat], { units: "kilometers" }) * 1000;
 }
 
@@ -1961,7 +1964,9 @@ function sampleFeatureCoordinates(feature: GeoJSONFeature, maxSamples: number): 
   const positions = flattenPositions(feature.geometry).filter(
     (position) => Number.isFinite(position[0]) && Number.isFinite(position[1]),
   );
-  const samples: LatLng[] = [representativeCoordinate(feature)];
+  const samples: LatLng[] = [];
+  const rep = representativeCoordinate(feature);
+  if (rep) samples.push(rep);
 
   if (positions.length === 0) {
     return samples;
@@ -2091,7 +2096,7 @@ function applyClippedResult(
     return;
   }
   const coord = representativeCoordinate(feature);
-  if (predicate(coord)) {
+  if (coord && predicate(coord)) {
     onMatch(feature, 0, 1);
   }
 }
