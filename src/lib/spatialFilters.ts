@@ -174,6 +174,7 @@ const STREET_PARKING_KEYS = [
   "parking:lane:both",
 ];
 const PARKING_FORBIDDEN_PATTERN = /^(no|none|no_parking|no_stopping|fire_lane)$/i;
+const FISHABLE_WATERWAY_VALUES = new Set(["river", "stream", "canal", "ditch", "drain"]);
 
 export function prepareSimpleResult(
   features: GeoJSONFeature[],
@@ -941,7 +942,7 @@ export function applyPresetSpatialFilters(
       }
       break;
 
-    case "preset-featured-fishing":
+    case "preset-featured-fishing": {
       for (const feature of features) {
         const tags = getFeatureTags(feature);
         if (!isFishingFeature(tags)) continue;
@@ -964,7 +965,84 @@ export function applyPresetSpatialFilters(
           ]),
         );
       }
+
+      const accessFeatures = new Map<string, GeoJSONFeature>();
+      for (const candidate of [...context.bridges, ...context.roads, ...context.trails]) {
+        const key = `${candidate.properties?.type ?? "feature"}-${candidate.properties?.id ?? accessFeatures.size}`;
+        if (!accessFeatures.has(key)) accessFeatures.set(key, candidate);
+      }
+
+      const waterways = features.filter((feature) => {
+        const tags = getFeatureTags(feature);
+        return (
+          FISHABLE_WATERWAY_VALUES.has(tags.waterway ?? "") && isLineGeometry(feature.geometry)
+        );
+      });
+
+      const seenCrossings = new Set<string>();
+      let crossingIndex = 0;
+      for (const waterway of waterways) {
+        const waterTags = getFeatureTags(waterway);
+        const waterLines = extractLineStrings(waterway.geometry);
+        if (waterLines.length === 0) continue;
+        const waterwayKind = capitalizeFirst(waterTags.waterway ?? "waterway");
+        const waterwayName = waterTags.name;
+
+        for (const access of accessFeatures.values()) {
+          const accessLines = extractLineStrings(access.geometry);
+          if (accessLines.length === 0) continue;
+          const accessKind = classifyFishingAccess(access);
+          const accessTags = getFeatureTags(access);
+          const accessName = accessTags.name;
+          const accessLabel = accessName ? `${accessName} (${accessKind})` : accessKind;
+
+          for (const waterLine of waterLines) {
+            if (waterLine.length < 2) continue;
+            for (const accessLine of accessLines) {
+              if (accessLine.length < 2) continue;
+              const crossings = lineIntersect(
+                lineString(waterLine),
+                lineString(accessLine),
+              );
+              for (const crossing of crossings.features) {
+                const [lng, lat] = crossing.geometry.coordinates;
+                const dedupeKey = `${lng.toFixed(6)},${lat.toFixed(6)}`;
+                if (seenCrossings.has(dedupeKey)) continue;
+                seenCrossings.add(dedupeKey);
+                crossingIndex += 1;
+
+                const crossingFeature: GeoJSONFeature = {
+                  type: "Feature",
+                  geometry: { type: "Point", coordinates: [lng, lat] },
+                  properties: {
+                    id: `fishing-access-${crossingIndex}`,
+                    type: "synthetic",
+                    tags: {
+                      ...(waterwayName ? { name: waterwayName } : {}),
+                      waterway: waterTags.waterway ?? "",
+                      access_via: accessKind,
+                      ...(accessName ? { access_name: accessName } : {}),
+                      ...(accessTags.highway ? { highway: accessTags.highway } : {}),
+                      ...(accessTags.bridge ? { bridge: accessTags.bridge } : {}),
+                      fishing: "access",
+                    },
+                  },
+                };
+
+                addResult(
+                  crossingFeature,
+                  "water-crossing",
+                  `${waterwayKind} × ${accessKind}`,
+                  undefined,
+                  `${waterwayName ? `${waterwayName} ${waterwayKind.toLowerCase()}` : waterwayKind.toLowerCase()} crosses ${accessLabel}.`,
+                );
+              }
+            }
+          }
+        }
+      }
       break;
+    }
 
     case "preset-featured-camping":
       for (const feature of features) {
@@ -1129,6 +1207,8 @@ export function isFishingFeature(tags: Record<string, string>): boolean {
   if (tags["seamark:type"] === "fishing_facility") return true;
   if (tags.waterway === "fish_pass" || tags.waterway === "fishpass") return true;
   if (tags.leisure === "slipway") return true;
+  if (tags.man_made === "slipway") return true;
+  if (tags.amenity === "boat_ramp") return true;
   if (
     tags.man_made === "pier" &&
     (isFishingAllowedTag(tags.fishing) || tags.sport === "fishing" || tags.leisure === "fishing")
@@ -1143,7 +1223,20 @@ function isFishingAllowedTag(value: string | undefined): boolean {
   return ["yes", "designated", "sport", "coarse", "fly", "sea"].includes(value.toLowerCase());
 }
 
+function classifyFishingAccess(feature: GeoJSONFeature): "bridge" | "road" | "trail" {
+  if (isBridgeOrCulvert(feature)) return "bridge";
+  if (isTrailOrPath(feature)) return "trail";
+  return "road";
+}
+
+function capitalizeFirst(text: string): string {
+  return text.length > 0 ? text[0].toUpperCase() + text.slice(1) : text;
+}
+
 export function classifyFishingFeature(tags: Record<string, string>): string {
+  if (tags.amenity === "boat_ramp") return "Boat ramp";
+  if (tags.man_made === "slipway") return "Boat ramp / slipway";
+  if (tags.leisure === "slipway") return "Boat ramp / slipway";
   if (tags.leisure === "fishing" || tags.sport === "fishing" || tags.amenity === "fishing") {
     return "Fishing spot";
   }
