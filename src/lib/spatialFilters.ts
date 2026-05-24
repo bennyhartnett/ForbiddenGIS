@@ -205,10 +205,14 @@ export function applyPresetSpatialFilters(
     distanceMeters?: number,
     detail?: string,
   ) => {
+    const lengthMeters = isLineGeometry(feature.geometry)
+      ? featureLengthMeters(feature)
+      : undefined;
     resultFeatures.push(
       attachScoutMetadata(feature, resultFeatures.length, "result", category, {
         label,
         distanceMeters,
+        lengthMeters,
         detail,
         category,
       }),
@@ -1832,6 +1836,10 @@ function extractLineStrings(geometry: Geometry): Position[][] {
   if (geometry.type === "LineString") return [geometry.coordinates];
   if (geometry.type === "MultiLineString") return geometry.coordinates;
   return [];
+}
+
+function isLineGeometry(geometry: Geometry): boolean {
+  return geometry.type === "LineString" || geometry.type === "MultiLineString";
 }
 
 function featureLengthMeters(feature: GeoJSONFeature): number {

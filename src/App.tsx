@@ -2642,6 +2642,12 @@ function FeatureCard({
               : ""}
           </dd>
         </dl>
+        {selectedFeature.matchReason.lengthMeters !== undefined ? (
+          <dl className="feature-card-row">
+            <dt>Length</dt>
+            <dd>{formatLengthImperial(selectedFeature.matchReason.lengthMeters)}</dd>
+          </dl>
+        ) : null}
         {selectedFeature.matchReason.detail ? (
           <p style={{ color: "var(--muted)", fontSize: "0.78rem", margin: 0 }}>
             {selectedFeature.matchReason.detail}
@@ -2747,6 +2753,9 @@ function MatchListPanel({
                     {match.matchReason.label}
                     {match.matchReason.distanceMeters !== undefined
                       ? ` · ${formatMetersForUi(match.matchReason.distanceMeters)}`
+                      : ""}
+                    {match.matchReason.lengthMeters !== undefined
+                      ? ` · ${formatLengthImperial(match.matchReason.lengthMeters)}`
                       : ""}
                   </span>
                   <span className="match-list-coord">
@@ -3804,6 +3813,14 @@ function formatMetersForUi(distanceMeters: number): string {
   return distanceMeters < 10
     ? `${distanceMeters.toFixed(1)} m`
     : `${Math.round(distanceMeters)} m`;
+}
+
+function formatLengthImperial(meters: number): string {
+  if (!Number.isFinite(meters) || meters <= 0) return "0 ft";
+  const feet = meters * 3.28084;
+  if (feet < 1000) return `${Math.round(feet)} ft`;
+  const miles = feet / 5280;
+  return miles < 10 ? `${miles.toFixed(2)} mi` : `${miles.toFixed(1)} mi`;
 }
 
 function normalizeMapTypeId(mapTypeId: string | undefined): MapDisplayType {

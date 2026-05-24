@@ -28,6 +28,7 @@ export interface MatchReason {
   label: string;
   detail?: string;
   distanceMeters?: number;
+  lengthMeters?: number;
   category?: ScoutCategory;
 }
 
@@ -269,6 +270,7 @@ export function attachScoutMetadata(
     scoutMatchReason: reason.label,
     scoutMatchDetail: reason.detail,
     scoutMatchDistanceMeters: reason.distanceMeters,
+    scoutMatchLengthMeters: reason.lengthMeters,
     scoutLat: coordinate.lat,
     scoutLng: coordinate.lng,
     scoutSelected: false,
@@ -299,6 +301,7 @@ export function getFeatureTags(feature: GeoJSONFeature): Record<string, string> 
     "scoutMatchReason",
     "scoutMatchDetail",
     "scoutMatchDistanceMeters",
+    "scoutMatchLengthMeters",
     "scoutLat",
     "scoutLng",
     "scoutSelected",
@@ -403,6 +406,10 @@ export function selectedFeatureFromProperties(
       distanceMeters:
         typeof properties.scoutMatchDistanceMeters === "number"
           ? properties.scoutMatchDistanceMeters
+          : undefined,
+      lengthMeters:
+        typeof properties.scoutMatchLengthMeters === "number"
+          ? properties.scoutMatchLengthMeters
           : undefined,
       category,
     },
