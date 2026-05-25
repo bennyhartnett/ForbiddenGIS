@@ -1,4 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type FormEvent,
+  type KeyboardEvent,
+  type PointerEvent,
+} from "react";
 import {
   bboxDiagonalKm,
   formatCoordinate,
@@ -20,6 +31,20 @@ import {
   getDataFeatureProperties,
   getGoogleMapsApiKey,
   loadGoogleMaps,
+  type GoogleAutocompletePrediction,
+  type GoogleAutocompleteResponse,
+  type GoogleDataStyleOptions,
+  type GoogleGeocoderResult,
+  type GoogleMap,
+  type GoogleMapsApi,
+  type GoogleMapsDataFeature,
+  type GoogleMapType,
+  type GoogleMapsEventListener,
+  type GoogleOverlayView,
+  type GooglePlacesLibrary,
+  type GooglePoint,
+  type GoogleStreetViewPanoramaData,
+  type GoogleStreetViewService,
 } from "./lib/googleMaps";
 import {
   buildSimpleOverpassQuery,
@@ -46,11 +71,19 @@ import {
   featureKindFor,
   resolveFeatureColors,
   type FeatureKind,
+  type FeatureKindMeta,
 } from "./lib/featureColors";
 import {
   exportFeatureCollection,
   type ExportFormat,
 } from "./lib/exporters";
+import {
+  classifyParkingFee,
+  countParkingFeeFilter,
+  filterCollectionByParkingFee,
+  parkingFeeFilterLabel,
+  type ParkingFeeFilterId,
+} from "./lib/parkingFeeFilter";
 
 type Mode = "preset" | "simple" | "raw";
 type MapDisplayType = "roadmap" | "satellite" | "hybrid" | "terrain";
@@ -83,7 +116,7 @@ type StreetViewState =
       status: "open";
       sourceName: string;
       scoutId?: string;
-      data: google.maps.StreetViewPanoramaData;
+      data: GoogleStreetViewPanoramaData;
     }
   | { status: "none"; sourceName: string; scoutId?: string; message: string }
   | { status: "error"; sourceName: string; scoutId?: string; message: string };
@@ -118,6 +151,13 @@ const SIMPLE_PRESETS = [
 ];
 
 const RENDER_LIMIT = 5000;
+const PARKING_PRESET_ID: PresetId = "preset-featured-parking";
+const PARKING_FEE_FILTERS: { id: ParkingFeeFilterId; label: string }[] = [
+  { id: "any", label: "Any" },
+  { id: "free", label: "Free" },
+  { id: "paid", label: "Paid" },
+  { id: "unknown", label: "Unknown" },
+];
 const DEFAULT_CENTER: LatLng = { lat: 38.9072, lng: -77.0369 };
 const DEFAULT_ZOOM = 15;
 const DEFAULT_LOCATION_QUERY = "Washington, DC";
@@ -209,20 +249,24 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRegionRef = useRef<HTMLElement | null>(null);
   const streetViewDivRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<google.maps.Map | null>(null);
-  const mapsRef = useRef<typeof google | null>(null);
-  const streetViewServiceRef = useRef<google.maps.StreetViewService | null>(null);
+  const mapRef = useRef<GoogleMap | null>(null);
+  const mapsRef = useRef<GoogleMapsApi | null>(null);
+  const streetViewServiceRef = useRef<GoogleStreetViewService | null>(null);
   const streetViewCoverageRef = useRef<google.maps.StreetViewCoverageLayer | null>(null);
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
   const autocompleteServiceRef = useRef<google.maps.places.AutocompleteService | null>(null);
   const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
-  const overlayMapTypeRef = useRef<google.maps.MapType | null>(null);
+  const overlayMapTypeRef = useRef<GoogleMapType | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const lastRequestKeyRef = useRef<string | null>(null);
-  const selectedDataFeatureRef = useRef<google.maps.Data.Feature | null>(null);
-  const dataFeatureClickRef = useRef<(feature: google.maps.Data.Feature) => void>(() => undefined);
+  const selectedDataFeatureRef = useRef<GoogleMapsDataFeature | null>(null);
+  const dataFeatureClickRef = useRef<(feature: GoogleMapsDataFeature) => void>(() => undefined);
   const featureColorMapRef = useRef<Record<FeatureKind, string>>({ ...DEFAULT_FEATURE_COLORS });
   const loadedFeaturesRef = useRef<GeoJSONFeatureCollection>({
+    type: "FeatureCollection",
+    features: [],
+  });
+  const unfilteredFeaturesRef = useRef<GeoJSONFeatureCollection>({
     type: "FeatureCollection",
     features: [],
   });
@@ -304,13 +348,20 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     new Set(),
   );
   const [matchListOpen, setMatchListOpen] = useState(false);
+  const [parkingFeeFilter, setParkingFeeFilter] = useState<ParkingFeeFilterId>("any");
+  const [parkingSearchActive, setParkingSearchActive] = useState(false);
   const [pegmanMode, setPegmanMode] = useState(false);
-  const pegmanMapClickListenerRef = useRef<google.maps.MapsEventListener | null>(null);
-  const pegmanProjectionRef = useRef<google.maps.OverlayView | null>(null);
+  const pegmanMapClickListenerRef = useRef<GoogleMapsEventListener | null>(null);
+  const pegmanProjectionRef = useRef<GoogleOverlayView | null>(null);
   const [streetViewWidth, setStreetViewWidth] = useState<number | null>(null);
   const streetViewResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const selectedPreset = useMemo(() => getPresetById(presetId), [presetId]);
+
+  const parkingFeeCounts = parkingSearchActive
+    ? countParkingFeeFilter(unfilteredFeaturesRef.current)
+    : null;
+
   const activeWarning = searchWarning ?? boundsWarning;
   const overlaySource = useMemo(
     () => OVERLAY_SOURCES.find((source) => source.id === overlayId) ?? OVERLAY_SOURCES[0],
@@ -398,10 +449,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       setSuggestionsStatus(null);
       void service
         .getPlacePredictions({ input, componentRestrictions: { country: "us" } })
-        .then((response) => {
+        .then((response: GoogleAutocompleteResponse) => {
           if (cancelled) return;
           const suggestions =
-            response.predictions?.slice(0, 5).map((prediction) => ({
+            response.predictions?.slice(0, 5).map((prediction: GoogleAutocompletePrediction) => ({
               description: prediction.description,
               placeId: prediction.place_id,
               mainText: prediction.structured_formatting?.main_text ?? prediction.description,
@@ -446,7 +497,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     const map = mapRef.current;
     const maps = mapsRef.current;
     if (!map || !maps) return;
-    map.data.setStyle((feature) =>
+    map.data.setStyle((feature: GoogleMapsDataFeature) =>
       styleForDataFeature(maps, feature, featureColorMapRef.current),
     );
   }, [effectiveFeatureColors]);
@@ -487,7 +538,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     const map = mapRef.current;
     if (!map) return;
     selectedDataFeatureRef.current = null;
-    map.data.forEach((feature) => {
+    map.data.forEach((feature: GoogleMapsDataFeature) => {
       map.data.remove(feature);
     });
   }, []);
@@ -545,7 +596,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   );
 
   const selectDataFeature = useCallback(
-    (feature: google.maps.Data.Feature) => {
+    (feature: GoogleMapsDataFeature) => {
       selectedDataFeatureRef.current?.setProperty("scoutSelected", false);
       selectedDataFeatureRef.current = feature;
       feature.setProperty("scoutSelected", true);
@@ -576,8 +627,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       if (currentZoom < FOCUS_MIN_ZOOM) {
         map.setZoom(FOCUS_MIN_ZOOM);
       }
-      let dataFeature: google.maps.Data.Feature | null = null;
-      map.data.forEach((feature) => {
+      let dataFeature: GoogleMapsDataFeature | null = null;
+      map.data.forEach((feature: GoogleMapsDataFeature) => {
         if (dataFeature) return;
         const id = feature.getProperty("scoutId");
         const role = feature.getProperty("scoutRole");
@@ -606,7 +657,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       if (resultFeatures.length === 0) return;
       const currentId = selectedFeature?.scoutId;
       const currentIndex = currentId
-        ? resultFeatures.findIndex((match) => match.scoutId === currentId)
+        ? resultFeatures.findIndex((match: SelectedFeature) => match.scoutId === currentId)
         : -1;
       const base = currentIndex >= 0 ? currentIndex : delta > 0 ? -1 : 0;
       const next =
@@ -617,7 +668,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   );
 
   const renderFeatures = useCallback(
-    (collection: GeoJSONFeatureCollection) => {
+    (
+      collection: GeoJSONFeatureCollection,
+      options?: { keepMatchListOpen?: boolean; openMatchListOnResults?: boolean },
+    ) => {
       const map = mapRef.current;
       if (!map) return;
       clearDataLayer();
@@ -644,10 +698,46 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       });
       setStreetViewAvailability(new Set());
       setResultFeatures(matches);
-      setMatchListOpen(matches.length > 0);
+      setResultCount(matches.length);
+      if (options?.openMatchListOnResults) {
+        setMatchListOpen(matches.length > 0);
+      } else if (options?.keepMatchListOpen) {
+        // Keep list visible for refine empty states.
+      } else {
+        setMatchListOpen(matches.length > 0);
+      }
+      if (matches.length === 0) {
+        setSelectedFeature(null);
+        selectedDataFeatureRef.current?.setProperty("scoutSelected", false);
+        selectedDataFeatureRef.current = null;
+      }
     },
     [clearDataLayer],
   );
+
+  const applyParkingFeeFilterToDisplay = useCallback(
+    (filter: ParkingFeeFilterId) => {
+      const display = filterCollectionByParkingFee(unfilteredFeaturesRef.current, filter);
+      renderFeatures(display, { keepMatchListOpen: true });
+    },
+    [renderFeatures],
+  );
+
+  useEffect(() => {
+    if (presetId !== PARKING_PRESET_ID) {
+      setParkingFeeFilter("any");
+      setParkingSearchActive(false);
+    }
+  }, [presetId]);
+
+  useEffect(() => {
+    if (!parkingSearchActive) return;
+    if (parkingFeeFilter === "any") {
+      renderFeatures(unfilteredFeaturesRef.current, { keepMatchListOpen: true });
+      return;
+    }
+    applyParkingFeeFilterToDisplay(parkingFeeFilter);
+  }, [parkingFeeFilter, parkingSearchActive, applyParkingFeeFilterToDisplay, renderFeatures]);
 
   useEffect(() => {
     if (resultFeatures.length === 0) return;
@@ -670,7 +760,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
             match.coordinate,
           );
           if (cancelled || !panorama) continue;
-          setStreetViewAvailability((prev) => {
+          setStreetViewAvailability((prev: Set<string>) => {
             if (prev.has(match.scoutId)) return prev;
             const next = new Set(prev);
             next.add(match.scoutId);
@@ -715,7 +805,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     setSearchOutcome("idle");
     searchStartedAtRef.current = null;
     loadedFeaturesRef.current = { type: "FeatureCollection", features: [] };
+    unfilteredFeaturesRef.current = { type: "FeatureCollection", features: [] };
     setLoadedFeatureCount(0);
+    setParkingFeeFilter("any");
+    setParkingSearchActive(false);
   }, [clearDataLayer, closeStreetView]);
 
   const handleSearch = useCallback(async () => {
@@ -854,9 +947,13 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         features: result.features,
       };
 
-      renderFeatures(newCollection);
+      unfilteredFeaturesRef.current = newCollection;
+      const isParkingSearch =
+        mode === "preset" && selectedPreset.id === PARKING_PRESET_ID;
+      setParkingSearchActive(isParkingSearch);
+      setParkingFeeFilter("any");
+      renderFeatures(newCollection, { openMatchListOnResults: true });
       setRawFeatureCount(overpass.rawFeatureCount);
-      setResultCount(newCollection.features.length);
       setSearchWarning(result.warnings[0] ?? null);
       const startedAt = searchStartedAtRef.current;
       if (startedAt !== null) {
@@ -967,7 +1064,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   }, [deactivatePegmanMode, pegmanMode, runStreetViewLookup]);
 
   const handlePegmanDragStart = useCallback(
-    (event: React.DragEvent<HTMLButtonElement>) => {
+    (event: DragEvent<HTMLButtonElement>) => {
       const map = mapRef.current;
       if (!map) {
         event.preventDefault();
@@ -991,7 +1088,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   }, [deactivatePegmanMode]);
 
   const handleMapPegmanDragOver = useCallback(
-    (event: React.DragEvent<HTMLElement>) => {
+    (event: DragEvent<HTMLElement>) => {
       if (!Array.from(event.dataTransfer.types).includes("application/x-pegman")) {
         return;
       }
@@ -1002,7 +1099,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   );
 
   const handleMapPegmanDrop = useCallback(
-    (event: React.DragEvent<HTMLElement>) => {
+    (event: DragEvent<HTMLElement>) => {
       if (!Array.from(event.dataTransfer.types).includes("application/x-pegman")) {
         return;
       }
@@ -1042,7 +1139,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       setError(null);
       setPlaceSuggestions([]);
 
-      geocoder.geocode(placeId ? { placeId } : { address: query }, (results, status) => {
+      geocoder.geocode(placeId ? { placeId } : { address: query }, (results: GoogleGeocoderResult[] | null, status) => {
         const result = results?.[0];
         if (status !== "OK" || !result) {
           setError("Could not find that location. Try a more specific place name or address.");
@@ -1095,7 +1192,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           setLocationQuery(fallback);
           return;
         }
-        geocoder.geocode({ location: latLng }, (results, status) => {
+        geocoder.geocode({ location: latLng }, (results: GoogleGeocoderResult[] | null, status) => {
           const formatted =
             status === "OK" && results && results.length > 0
               ? results[0].formatted_address
@@ -1150,7 +1247,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
   const handleNudgeDate = useCallback(
     (days: number) => {
-      setGibsDate((prev) => {
+      setGibsDate((prev: string) => {
         const next = new Date(prev + "T00:00:00Z");
         next.setUTCDate(next.getUTCDate() + days);
         const latest = latestAvailableGibsDate();
@@ -1166,7 +1263,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    const listeners: google.maps.MapsEventListener[] = [];
+    const listeners: GoogleMapsEventListener[] = [];
 
     async function setupMap() {
       try {
@@ -1198,21 +1295,21 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           streetViewCoverageRef.current = new maps.maps.StreetViewCoverageLayer();
         }
 
-        const ProjectionOverlay = class extends maps.maps.OverlayView {
-          onAdd() {}
-          draw() {}
-          onRemove() {}
-        };
-        const projectionOverlay = new ProjectionOverlay();
+        class PegmanProjectionOverlay extends maps.maps.OverlayView {
+          onAdd(): void {}
+          draw(): void {}
+          onRemove(): void {}
+        }
+        const projectionOverlay: GoogleOverlayView = new PegmanProjectionOverlay();
         projectionOverlay.setMap(map);
         pegmanProjectionRef.current = projectionOverlay;
-        map.data.setStyle((feature) =>
+        map.data.setStyle((feature: GoogleMapsDataFeature) =>
           styleForDataFeature(maps, feature, featureColorMapRef.current),
         );
 
         void maps.maps
           .importLibrary("places")
-          .then((placesLibrary) => {
+          .then((placesLibrary: GooglePlacesLibrary) => {
             if (!cancelled && "AutocompleteService" in placesLibrary) {
               autocompleteServiceRef.current = new placesLibrary.AutocompleteService();
             }
@@ -1355,7 +1452,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   useEffect(() => {
     if (streetViewWidth === null) return;
     const handleWindowResize = () => {
-      setStreetViewWidth((current) =>
+      setStreetViewWidth((current: number | null) =>
         current === null ? current : clampStreetViewWidth(current),
       );
     };
@@ -1364,7 +1461,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   }, [clampStreetViewWidth, streetViewWidth]);
 
   const handleStreetViewResizePointerDown = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
+    (event: PointerEvent<HTMLDivElement>) => {
       if (streetViewWidth === null) return;
       event.preventDefault();
       const target = event.currentTarget;
@@ -1379,7 +1476,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   );
 
   const handleStreetViewResizePointerMove = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
+    (event: PointerEvent<HTMLDivElement>) => {
       const state = streetViewResizeStateRef.current;
       if (!state) return;
       const delta = state.startX - event.clientX;
@@ -1389,7 +1486,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   );
 
   const endStreetViewResize = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
+    (event: PointerEvent<HTMLDivElement>) => {
       if (!streetViewResizeStateRef.current) return;
       streetViewResizeStateRef.current = null;
       const target = event.currentTarget;
@@ -1406,12 +1503,12 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   }, [clampStreetViewWidth]);
 
   const handleStreetViewResizeKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
+    (event: KeyboardEvent<HTMLDivElement>) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
       const step = event.shiftKey ? 64 : 16;
       const direction = event.key === "ArrowLeft" ? 1 : -1;
-      setStreetViewWidth((current) =>
+      setStreetViewWidth((current: number | null) =>
         current === null
           ? current
           : clampStreetViewWidth(current + step * direction),
@@ -1458,7 +1555,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     let cancelled = false;
     setResolvingAddress(true);
     setResolvedAddress(null);
-    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+    geocoder.geocode({ location: { lat, lng } }, (results: GoogleGeocoderResult[] | null, status) => {
       if (cancelled) return;
       const first = results && results.length > 0 ? results[0].formatted_address : null;
       const address = status === "OK" && first ? first : null;
@@ -1475,7 +1572,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   useEffect(() => {
     if (!selectedFeature) return;
     const nextName = pickFeatureDisplayName(selectedFeature, resolvedAddress, resolvingAddress);
-    setStreetViewState((prev) => {
+    setStreetViewState((prev: StreetViewState) => {
       if (prev.status === "idle") return prev;
       if (prev.scoutId !== selectedFeature.scoutId) return prev;
       if (prev.sourceName === nextName) return prev;
@@ -1529,7 +1626,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         {matchListOpen && resultFeatures.length > 0 ? null : (
           <PresetPanel
             open={presetPanelOpen}
-            onToggle={() => setPresetPanelOpen((v) => !v)}
+            onToggle={() => setPresetPanelOpen((v: boolean) => !v)}
             presetId={presetId}
             onPresetChange={setPresetId}
             presetSearch={presetSearch}
@@ -1557,7 +1654,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
         <LayersPanel
           open={layersPanelOpen}
-          onToggle={() => setLayersPanelOpen((v) => !v)}
+          onToggle={() => setLayersPanelOpen((v: boolean) => !v)}
           mapType={mapType}
           onMapTypeChange={setMapTypeId}
           theme={mapTheme}
@@ -1571,10 +1668,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           featureColors={effectiveFeatureColors}
           featureColorOverrides={featureColorOverrides}
           onFeatureColorChange={(kind, color) =>
-            setFeatureColorOverrides((prev) => ({ ...prev, [kind]: color }))
+            setFeatureColorOverrides((prev: Partial<Record<FeatureKind, string>>) => ({ ...prev, [kind]: color }))
           }
           onFeatureColorReset={(kind) =>
-            setFeatureColorOverrides((prev) => {
+            setFeatureColorOverrides((prev: Partial<Record<FeatureKind, string>>) => {
               if (!(kind in prev)) return prev;
               const next = { ...prev };
               delete next[kind];
@@ -1592,7 +1689,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           pegmanActive={pegmanMode}
           onZoomIn={() => zoomMap(1)}
           onZoomOut={() => zoomMap(-1)}
-          onToggleTilt={() => setTiltOn((v) => !v)}
+          onToggleTilt={() => setTiltOn((v: boolean) => !v)}
           onResetCamera={resetMapCamera}
           onFullscreen={enterMapFullscreen}
           onStreetView={togglePegmanMode}
@@ -1621,13 +1718,19 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           {error ? <p className="notice error">{error}</p> : null}
         </div>
 
-        {matchListOpen && resultFeatures.length > 0 ? (
+        {matchListOpen &&
+        (resultFeatures.length > 0 || (parkingSearchActive && parkingFeeCounts !== null)) ? (
           <MatchListPanel
             matches={resultFeatures}
             selectedId={selectedFeature?.scoutId ?? null}
             streetViewAvailability={streetViewAvailability}
             onSelect={focusMatch}
             onBack={() => setMatchListOpen(false)}
+            showParkingFeeRefine={parkingSearchActive}
+            parkingFeeFilter={parkingFeeFilter}
+            parkingFeeCounts={parkingFeeCounts}
+            onParkingFeeFilterChange={setParkingFeeFilter}
+            totalUnfiltered={parkingFeeCounts?.any ?? 0}
           />
         ) : null}
 
@@ -1640,7 +1743,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
             totalMatches={resultFeatures.length}
             currentIndex={
               resultFeatures.findIndex(
-                (match) => match.scoutId === selectedFeature.scoutId,
+                (match: SelectedFeature) => match.scoutId === selectedFeature.scoutId,
               )
             }
             onPrev={() => cycleMatch(-1)}
@@ -1834,12 +1937,12 @@ function SearchPill({
     <form
       ref={containerRef}
       className="search-pill"
-      onSubmit={(event) => {
+      onSubmit={(event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         setDropdownOpen(false);
         onSubmit();
       }}
-      onKeyDown={(event) => {
+      onKeyDown={(event: KeyboardEvent<HTMLFormElement>) => {
         if (event.key === "Escape" && dropdownOpen) {
           event.stopPropagation();
           setDropdownOpen(false);
@@ -1854,7 +1957,7 @@ function SearchPill({
         </span>
         <input
           value={locationQuery}
-          onChange={(event) => {
+          onChange={(event: ChangeEvent<HTMLInputElement>) => {
             setDropdownOpen(true);
             onLocationChange(event.target.value);
           }}
@@ -1992,7 +2095,9 @@ function PresetPanel(props: {
             </span>
             <input
               value={props.presetSearch}
-              onChange={(event) => props.onPresetSearchChange(event.target.value)}
+              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                props.onPresetSearchChange(event.target.value)
+              }
               placeholder={`Search ${PRESETS.length} premade queries`}
               spellCheck={false}
             />
@@ -2188,13 +2293,16 @@ function LayersPanel(props: {
   presentFeatureKinds: ReadonlySet<FeatureKind>;
 }) {
   const presentKinds = useMemo(() => {
-    const inResults = FEATURE_KINDS.filter((meta) => props.presentFeatureKinds.has(meta.kind));
+    const inResults = FEATURE_KINDS.filter((meta: FeatureKindMeta) =>
+      props.presentFeatureKinds.has(meta.kind),
+    );
     if (inResults.length > 0) return inResults;
-    return FEATURE_KINDS.filter((meta) => meta.group === "result");
+    return FEATURE_KINDS.filter((meta: FeatureKindMeta) => meta.group === "result");
   }, [props.presentFeatureKinds]);
 
   const showingPresent = props.presentFeatureKinds.size > 0;
-  const resultKindsPresent = presentKinds.filter((meta) => meta.group === "result").length;
+  const resultKindsPresent = presentKinds.filter((meta: FeatureKindMeta) => meta.group === "result")
+    .length;
   const overrideCount = Object.keys(props.featureColorOverrides).length;
   return (
     <aside className={`panel layers-panel ${props.open ? "" : "collapsed"}`} aria-label="Layers">
@@ -2264,7 +2372,9 @@ function LayersPanel(props: {
               <input
                 type="checkbox"
                 checked={props.tiltOn}
-                onChange={(event) => props.onTiltChange(event.target.checked)}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  props.onTiltChange(event.target.checked)
+                }
               />
               <span className="slider" />
             </span>
@@ -2302,7 +2412,9 @@ function LayersPanel(props: {
                 max={1}
                 step={0.05}
                 value={props.overlayOpacity}
-                onChange={(event) => props.onOverlayOpacityChange(Number(event.target.value))}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  props.onOverlayOpacityChange(Number(event.target.value))
+                }
                 aria-label="Overlay opacity"
               />
             </div>
@@ -2323,7 +2435,9 @@ function LayersPanel(props: {
               <input
                 type="checkbox"
                 checked={props.autoContrast}
-                onChange={(event) => props.onAutoContrastChange(event.target.checked)}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  props.onAutoContrastChange(event.target.checked)
+                }
               />
               <span className="slider" />
             </span>
@@ -2336,7 +2450,7 @@ function LayersPanel(props: {
           </p>
 
           <div className="feature-color-list">
-            {presentKinds.map((meta) => {
+            {presentKinds.map((meta: FeatureKindMeta) => {
               const isOverridden = meta.kind in props.featureColorOverrides;
               const color = props.featureColors[meta.kind];
               return (
@@ -2344,7 +2458,9 @@ function LayersPanel(props: {
                   <input
                     type="color"
                     value={color}
-                    onChange={(event) => props.onFeatureColorChange(meta.kind, event.target.value)}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      props.onFeatureColorChange(meta.kind, event.target.value)
+                    }
                     aria-label={`Color for ${meta.label}`}
                   />
                   <span className="feature-color-label">
@@ -2405,8 +2521,8 @@ function MapControls(props: {
   onResetCamera: () => void;
   onFullscreen: () => void;
   onStreetView: () => void;
-  onPegmanDragStart: (event: React.DragEvent<HTMLButtonElement>) => void;
-  onPegmanDragEnd: (event: React.DragEvent<HTMLButtonElement>) => void;
+  onPegmanDragStart: (event: DragEvent<HTMLButtonElement>) => void;
+  onPegmanDragEnd: (event: DragEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <nav className="map-controls" aria-label="Map controls">
@@ -2470,7 +2586,7 @@ function MapLegend(props: {
 }) {
   const [expanded, setExpanded] = useState(true);
   const items = useMemo(
-    () => FEATURE_KINDS.filter((meta) => props.presentFeatureKinds.has(meta.kind)),
+    () => FEATURE_KINDS.filter((meta: FeatureKindMeta) => props.presentFeatureKinds.has(meta.kind)),
     [props.presentFeatureKinds],
   );
 
@@ -2485,7 +2601,7 @@ function MapLegend(props: {
       <button
         type="button"
         className="map-legend-header"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded((v: boolean) => !v)}
         aria-expanded={expanded}
         title={expanded ? "Collapse legend" : "Expand legend"}
       >
@@ -2494,7 +2610,7 @@ function MapLegend(props: {
       </button>
       {expanded ? (
         <ul className="map-legend-list">
-          {items.map((meta) => (
+          {items.map((meta: FeatureKindMeta) => (
             <li
               key={meta.kind}
               className={`map-legend-item ${meta.group === "context" ? "is-context" : ""}`}
@@ -2565,7 +2681,7 @@ function StreetViewTimeSlider({
         max={entries.length - 1}
         step={1}
         value={clampedIndex}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(Number(event.target.value))}
         aria-label="Street view capture date"
       />
       <button
@@ -2613,7 +2729,7 @@ function TimeDock({
         max={maxTime}
         step={86_400_000}
         value={valueTime}
-        onChange={(event) => {
+        onChange={(event: ChangeEvent<HTMLInputElement>) => {
           const next = new Date(Number(event.target.value));
           onChange(formatGibsDate(next));
         }}
@@ -2816,12 +2932,22 @@ function MatchListPanel({
   streetViewAvailability,
   onSelect,
   onBack,
+  showParkingFeeRefine,
+  parkingFeeFilter,
+  parkingFeeCounts,
+  onParkingFeeFilterChange,
+  totalUnfiltered,
 }: {
   matches: SelectedFeature[];
   selectedId: string | null;
   streetViewAvailability: Set<string>;
   onSelect: (match: SelectedFeature) => void;
   onBack: () => void;
+  showParkingFeeRefine: boolean;
+  parkingFeeFilter: ParkingFeeFilterId;
+  parkingFeeCounts: Record<ParkingFeeFilterId, number> | null;
+  onParkingFeeFilterChange: (filter: ParkingFeeFilterId) => void;
+  totalUnfiltered: number;
 }) {
   const selectedRef = useRef<HTMLButtonElement | null>(null);
 
@@ -2844,16 +2970,53 @@ function MatchListPanel({
         <div className="match-list-heading">
           <p className="eyebrow">Matches</p>
           <h2>
-            {matches.length.toLocaleString()}{" "}
+            {matches.length.toLocaleString()}
+            {showParkingFeeRefine &&
+            parkingFeeFilter !== "any" &&
+            totalUnfiltered > matches.length
+              ? ` of ${totalUnfiltered.toLocaleString()}`
+              : null}{" "}
             {matches.length === 1 ? "result" : "results"}
           </h2>
         </div>
       </div>
+      {showParkingFeeRefine && parkingFeeCounts ? (
+        <div className="match-list-refine" role="group" aria-label="Refine parking by fee">
+          <p className="match-list-refine-label">Refine</p>
+          <div className="segmented match-list-refine-controls">
+            {PARKING_FEE_FILTERS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={parkingFeeFilter === option.id}
+                onClick={() => onParkingFeeFilterChange(option.id)}
+              >
+                {option.label}
+                <span className="match-list-refine-count">
+                  {parkingFeeCounts[option.id].toLocaleString()}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {matches.length === 0 ? (
+        <p className="match-list-empty" role="status">
+          No matches for this refine filter. Try Any or Unknown, or zoom in and search again.
+        </p>
+      ) : (
       <ol className="match-list">
         {matches.map((match, index) => {
           const isSelected = match.scoutId === selectedId;
           const hasStreetView = streetViewAvailability.has(match.scoutId);
           const surfaceLabel = describeSurface(match.tags);
+          const feeClass = showParkingFeeRefine
+            ? classifyParkingFee(
+                match.tags,
+                (match.category ?? "parking") as ScoutCategory,
+              )
+            : null;
+          const feeLabel = feeClass ? parkingFeeFilterLabel(feeClass) : null;
           return (
             <li key={match.scoutId}>
               <button
@@ -2878,6 +3041,14 @@ function MatchListPanel({
                     ) : null}
                   </span>
                   <span className="match-list-tags">
+                    {feeLabel ? (
+                      <span
+                        className={`match-list-fee match-list-fee--${feeClass}`}
+                        title={`Parking fee: ${feeLabel}`}
+                      >
+                        {feeLabel}
+                      </span>
+                    ) : null}
                     <span
                       className={`match-list-surface${surfaceLabel ? "" : " is-unknown"}`}
                       title={
@@ -2907,6 +3078,7 @@ function MatchListPanel({
           );
         })}
       </ol>
+      )}
     </aside>
   );
 }
@@ -3502,11 +3674,11 @@ function PresetGlyph({ presetId }: { presetId: PresetId }) {
 /* ---------------- Helpers ---------------- */
 
 function buildOverlayMapType(
-  maps: typeof google,
+  maps: GoogleMapsApi,
   overlay: (typeof OVERLAY_SOURCES)[number],
   date: string,
   opacity: number,
-): google.maps.MapType | null {
+): GoogleMapType | null {
   if (overlay.kind === "none") return null;
 
   const tileSize = new maps.maps.Size(256, 256);
@@ -3519,7 +3691,7 @@ function buildOverlayMapType(
     minZoom: 0,
     maxZoom,
     opacity,
-    getTileUrl: (coord, zoom) => {
+    getTileUrl: (coord: GooglePoint, zoom: number) => {
       if (zoom > maxZoom) return null;
       const n = 1 << zoom;
       if (coord.x < 0 || coord.x >= n) return null;
@@ -3546,7 +3718,7 @@ function latestAvailableGibsDate(): string {
   return formatGibsDate(date);
 }
 
-function extractPanoHistory(data: google.maps.StreetViewPanoramaData): PanoEntry[] {
+function extractPanoHistory(data: GoogleStreetViewPanoramaData): PanoEntry[] {
   const raw = (data as unknown as { time?: unknown }).time;
   if (!Array.isArray(raw)) return [];
 
@@ -3771,7 +3943,7 @@ function validateSearchGate(
 }
 
 function syncLiveMapState(
-  map: google.maps.Map,
+  map: GoogleMap,
   mode: Mode,
   tagFilter: string,
   presetMinZoom: number,
@@ -3997,7 +4169,7 @@ function normalizeMapTypeId(mapTypeId: string | undefined): MapDisplayType {
   return "roadmap";
 }
 
-function getCurrentMapBBox(map: google.maps.Map): BBox | null {
+function getCurrentMapBBox(map: GoogleMap): BBox | null {
   const bounds = map.getBounds();
   if (bounds) return googleBoundsToBBox(bounds);
   const center = map.getCenter();
@@ -4044,7 +4216,7 @@ function clampLongitude(longitude: number): number {
 }
 
 function mapBoundsWarning(
-  map: google.maps.Map,
+  map: GoogleMap,
   mode: Mode,
   tagFilter: string,
   presetMinZoom: number,
@@ -4062,10 +4234,10 @@ function mapBoundsWarning(
 }
 
 function styleForDataFeature(
-  maps: typeof google,
-  feature: google.maps.Data.Feature,
+  maps: GoogleMapsApi,
+  feature: GoogleMapsDataFeature,
   colorMap: Record<FeatureKind, string>,
-): google.maps.Data.StyleOptions {
+): GoogleDataStyleOptions {
   const role = readDataString(feature, "scoutRole", "result") as ScoutRole;
   const category = readDataString(feature, "scoutCategory", "simple") as ScoutCategory;
   const tags = readDataTags(feature);
@@ -4120,7 +4292,7 @@ function styleForDataFeature(
   };
 }
 
-function readDataTags(feature: google.maps.Data.Feature): Record<string, string> {
+function readDataTags(feature: GoogleMapsDataFeature): Record<string, string> {
   const raw = feature.getProperty("tags");
   if (!raw || typeof raw !== "object") return {};
   const out: Record<string, string> = {};
@@ -4146,7 +4318,7 @@ function collectFeatureKinds(
 }
 
 function readDataString(
-  feature: google.maps.Data.Feature,
+  feature: GoogleMapsDataFeature,
   key: string,
   fallback: string,
 ): string {

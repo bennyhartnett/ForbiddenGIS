@@ -1,5 +1,23 @@
 import type { LatLng } from "./geo";
 
+/** Re-export Google Maps types so app code does not depend on the global `google` namespace. */
+export type GoogleMapsApi = typeof google;
+export type GoogleMap = google.maps.Map;
+export type GoogleMapsDataFeature = google.maps.Data.Feature;
+export type GoogleMapType = google.maps.MapType;
+export type GoogleOverlayView = google.maps.OverlayView;
+export type GoogleMapsEventListener = google.maps.MapsEventListener;
+export type GoogleStreetViewService = google.maps.StreetViewService;
+export type GoogleStreetViewPanoramaData = google.maps.StreetViewPanoramaData;
+export type GoogleGeocoder = google.maps.Geocoder;
+export type GoogleGeocoderResult = google.maps.GeocoderResult;
+export type GoogleAutocompleteService = google.maps.places.AutocompleteService;
+export type GoogleAutocompletePrediction = google.maps.places.AutocompletePrediction;
+export type GoogleAutocompleteResponse = google.maps.places.AutocompleteResponse;
+export type GooglePlacesLibrary = google.maps.PlacesLibrary;
+export type GooglePoint = google.maps.Point;
+export type GoogleDataStyleOptions = google.maps.Data.StyleOptions;
+
 let googleMapsPromise: Promise<typeof google> | null = null;
 
 export function getGoogleMapsApiKey(): string {
@@ -45,7 +63,7 @@ export function getDataFeatureProperties(
   feature: google.maps.Data.Feature,
 ): Record<string, unknown> {
   const properties: Record<string, unknown> = {};
-  feature.forEachProperty((value, key) => {
+  feature.forEachProperty((value: unknown, key: string) => {
     properties[key] = value;
   });
   return properties;
