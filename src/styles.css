@@ -2386,50 +2386,52 @@ body.street-view-resizing .street-view-canvas {
     align-items: center;
     padding: 6px;
   }
-  
+
   .layers-panel.collapsed .panel-icon,
   .layers-panel.collapsed .panel-header h2 {
     display: none;
   }
 
-/* Expanded layers panel */
-.layers-panel {
-  right: var(--mobile-edge);
-  left: auto;
-  top: calc(max(12px, env(safe-area-inset-top)) + 64px); /* below search */
-  bottom: auto;
-  width: min(240px, 72vw);
-  max-width: 240px;
-  max-height: 62vh;
-}
+  /* Expanded layers panel */
+  .layers-panel {
+    right: var(--mobile-edge);
+    left: auto;
+    top: calc(max(12px, env(safe-area-inset-top)) + 64px); /* below search */
+    bottom: auto;
+    width: min(240px, 72vw);
+    max-width: 240px;
+    max-height: 62vh;
+  }
 
-/* Collapsed mini sidebar tab */
-.layers-panel.collapsed {
-  width: 56px;
-  height: 56px;
-  max-width: 56px;
-  max-height: 56px;
-  top: calc(max(12px, env(safe-area-inset-top)) + 64px); /* below search */
-  bottom: auto;
-  right: var(--mobile-edge);
-  left: auto;
-  overflow: hidden;
-  z-index: 6;
-}
-.layers-panel.collapsed .panel-icon {
-  width: 28px;
-  height: 28px;
-}
-/* Keep only icon + toggle visible in collapsed state */
-.layers-panel.collapsed .panel-header {
-  grid-template-columns: 1fr;  /* or auto auto if you want both icon and chevron */
-  justify-items: center;
-  padding: 8px;
-}
+  /* Collapsed mini sidebar tab */
+  .layers-panel.collapsed {
+    width: 56px;
+    height: 56px;
+    max-width: 56px;
+    max-height: 56px;
+    top: calc(max(12px, env(safe-area-inset-top)) + 64px); /* below search */
+    bottom: auto;
+    right: var(--mobile-edge);
+    left: auto;
+    overflow: hidden;
+    z-index: 6;
+  }
 
-.layers-panel.collapsed .panel-header h2 {
-  display: none;  /* hide "Layers" text on mini tab */
-}
+  .layers-panel.collapsed .panel-icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  /* Keep only icon + toggle visible in collapsed state */
+  .layers-panel.collapsed .panel-header {
+    grid-template-columns: 1fr;  /* or auto auto if you want both icon and chevron */
+    justify-items: center;
+    padding: 8px;
+  }
+
+  .layers-panel.collapsed .panel-header h2 {
+    display: none;  /* hide "Layers" text on mini tab */
+  }
 
   /* Keep mobile panel headers reachable when one is collapsed. */
   .preset-panel {
