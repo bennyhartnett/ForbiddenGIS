@@ -19,6 +19,7 @@ import type {
   MatchReason,
   PresetDefinition,
   PresetResult,
+  BBox,
   ScoutCategory,
   ScoutRole,
   SpatialContext,
@@ -36,6 +37,7 @@ export interface SpatialFilterOptions {
   includeWater: boolean;
   renderLimit: number;
   simpleMatchLabel?: string;
+  searchBBox?: BBox;
 }
 
 export const NO_BUILDINGS_DISTANCE_METERS = 30.48;
@@ -52,6 +54,9 @@ export const LOW_SPEED_MPH_VALUES = [25, 30] as const;
 export const TREE_LINED_REQUIRED_METERS = 30.48;
 export const TREE_CONTEXT_DISTANCE_METERS = 15;
 export const OFF_ROAD_MIN_LENGTH_METERS = 30.48;
+export const WIDE_WATER_MIN_WIDTH_METERS = 6.096;
+const WIDE_WATER_SAMPLE_STEP_METERS = 5;
+const WIDE_WATER_SCANLINE_COUNT = 9;
 
 const PRIVATE_VALUES = new Set(["private", "no", "customers", "permit"]);
 const RESTRICTED_VALUES = new Set(["private", "no", "customers", "permit", "destination"]);
@@ -198,6 +203,7 @@ const STREET_PARKING_KEYS = [
 const PARKING_FORBIDDEN_PATTERN = /^(no|none|no_parking|no_stopping|fire_lane)$/i;
 const FISHABLE_WATERWAY_VALUES = new Set(["river", "stream", "canal"]);
 const DRY_WATERWAY_TAG_PATTERN = /^(yes|seasonal|spring|summer|autumn|winter|wet_season|dry_season)$/i;
+const sampleCoordinateCache = new WeakMap<GeoJSONFeature, Map<number, LatLng[]>>();
 
 function isLikelyDryWaterway(tags: Record<string, string>): boolean {
   if (tags.intermittent && DRY_WATERWAY_TAG_PATTERN.test(tags.intermittent)) return true;
@@ -211,12 +217,13 @@ export function prepareSimpleResult(
   options: SpatialFilterOptions,
 ): PresetResult {
   const prepared = features
-    .map((feature, index) =>
-      attachScoutMetadata(feature, index, "result", categoryForFeature(feature), {
+    .map((feature, index) => {
+      const category = categoryForFeature(feature);
+      return attachScoutMetadata(feature, index, "result", category, {
         label: options.simpleMatchLabel ?? "Matched simple tag search",
-        category: categoryForFeature(feature),
-      }),
-    )
+        category,
+      });
+    })
     .filter((feature): feature is GeoJSONFeature => feature !== null);
 
   return capFeatures(prepared, prepared.length, options.renderLimit);
@@ -729,11 +736,9 @@ export function applyPresetSpatialFilters(
     }
 
     case "preset-22": {
-      addContexts(contextFeatures, [...context.parks, ...context.woods], "context-park", "park", "Park/woods context");
-      const nearParkOrWoods = nearAnyPredicate(
-        [...context.parks, ...context.woods],
-        NEAR_PARK_DISTANCE_METERS,
-      );
+      const parkAndWoods = [...context.parks, ...context.woods];
+      addContexts(contextFeatures, parkAndWoods, "context-park", "park", "Park/woods context");
+      const nearParkOrWoods = nearAnyPredicate(parkAndWoods, NEAR_PARK_DISTANCE_METERS);
       for (const road of context.roads) {
         const tags = getFeatureTags(road);
         if (!isStreetParkingLegalish(tags)) continue;
@@ -751,17 +756,20 @@ export function applyPresetSpatialFilters(
     }
 
     case "preset-23":
-      addContexts(contextFeatures, [...context.parking, ...context.pullOffs], "context-pull-off", "pull-off", "Pull-off/parking context");
-      for (const bridge of context.bridges) {
-        const pullOff = nearestFeatureDistance(bridge, [...context.parking, ...context.pullOffs], NEAR_PULL_OFF_DISTANCE_METERS);
-        if (pullOff.distanceMeters <= NEAR_PULL_OFF_DISTANCE_METERS) {
-          addResult(
-            bridge,
-            "bridge",
-            "Bridge with nearby pull-off or parking",
-            pullOff.distanceMeters,
-            `Nearest pull-off/parking: ${formatMeters(pullOff.distanceMeters)}. ${tagDetail(getFeatureTags(bridge), ["bridge", "man_made", "highway", "name"])}`,
-          );
+      {
+        const parkingAndPullOffs = [...context.parking, ...context.pullOffs];
+        addContexts(contextFeatures, parkingAndPullOffs, "context-pull-off", "pull-off", "Pull-off/parking context");
+        for (const bridge of context.bridges) {
+          const pullOff = nearestFeatureDistance(bridge, parkingAndPullOffs, NEAR_PULL_OFF_DISTANCE_METERS);
+          if (pullOff.distanceMeters <= NEAR_PULL_OFF_DISTANCE_METERS) {
+            addResult(
+              bridge,
+              "bridge",
+              "Bridge with nearby pull-off or parking",
+              pullOff.distanceMeters,
+              `Nearest pull-off/parking: ${formatMeters(pullOff.distanceMeters)}. ${tagDetail(getFeatureTags(bridge), ["bridge", "man_made", "highway", "name"])}`,
+            );
+          }
         }
       }
       break;
@@ -829,20 +837,23 @@ export function applyPresetSpatialFilters(
       break;
 
     case "preset-28":
-      addContexts(contextFeatures, deadEndCandidates(context), "context-road", "road", "Dead-end context");
-      addContexts(contextFeatures, context.water, "context-water", "water", "Water context");
-      for (const path of context.trails.filter(isWalkingPathFeature)) {
-        if (isClearlyPrivate(path)) continue;
-        const deadEnd = nearestFeatureDistance(path, deadEndCandidates(context), DEAD_END_TO_TRAIL_DISTANCE_METERS);
-        const water = nearestFeatureDistance(path, context.water, TRAIL_TO_WATER_DISTANCE_METERS);
-        if (deadEnd.distanceMeters <= DEAD_END_TO_TRAIL_DISTANCE_METERS && water.distanceMeters <= TRAIL_TO_WATER_DISTANCE_METERS) {
-          addResult(
-            path,
-            "trail",
-            "Walking path from dead end to water",
-            Math.max(deadEnd.distanceMeters, water.distanceMeters),
-            `Dead-end distance: ${formatMeters(deadEnd.distanceMeters)}. Water distance: ${formatMeters(water.distanceMeters)}.`,
-          );
+      {
+        const deadEnds = deadEndCandidates(context);
+        addContexts(contextFeatures, deadEnds, "context-road", "road", "Dead-end context");
+        addContexts(contextFeatures, context.water, "context-water", "water", "Water context");
+        for (const path of context.trails.filter(isWalkingPathFeature)) {
+          if (isClearlyPrivate(path)) continue;
+          const deadEnd = nearestFeatureDistance(path, deadEnds, DEAD_END_TO_TRAIL_DISTANCE_METERS);
+          const water = nearestFeatureDistance(path, context.water, TRAIL_TO_WATER_DISTANCE_METERS);
+          if (deadEnd.distanceMeters <= DEAD_END_TO_TRAIL_DISTANCE_METERS && water.distanceMeters <= TRAIL_TO_WATER_DISTANCE_METERS) {
+            addResult(
+              path,
+              "trail",
+              "Walking path from dead end to water",
+              Math.max(deadEnd.distanceMeters, water.distanceMeters),
+              `Dead-end distance: ${formatMeters(deadEnd.distanceMeters)}. Water distance: ${formatMeters(water.distanceMeters)}.`,
+            );
+          }
         }
       }
       break;
@@ -1179,6 +1190,19 @@ export function applyPresetSpatialFilters(
       }
       break;
 
+    case "preset-featured-wide-water":
+      for (const match of localizedWideWaterMatches(context.water, options.searchBBox)) {
+        const tags = getFeatureTags(match.source);
+        addResult(
+          match.feature,
+          "water",
+          "Public water wider than 20 ft",
+          undefined,
+          `Localized width: ${formatMeters(match.minWidthMeters)}-${formatMeters(match.maxWidthMeters)}. ${describeClip(match.lengthMeters, match.spans)}. ${tagDetail(tags, ["name", "natural", "water", "waterway", "width", "est_width", "access", "operator"])}`,
+        );
+      }
+      break;
+
     case "preset-weather":
       for (const feature of features) {
         const tags = getFeatureTags(feature);
@@ -1236,7 +1260,7 @@ export function applyPresetSpatialFilters(
       break;
   }
 
-  if (options.includeWater) {
+  if (options.includeWater && preset.id !== "preset-featured-wide-water") {
     addContexts(contextFeatures, context.water, "context-water", "water", "Water context");
   }
 
@@ -1249,21 +1273,41 @@ export function applyPresetSpatialFilters(
 }
 
 export function createSpatialContext(features: GeoJSONFeature[]): SpatialContext {
-  return {
-    roads: features.filter(isRoadFeature),
-    parking: features.filter(isParking),
-    trails: features.filter(isTrailOrPath),
-    bridges: features.filter(isBridgeOrCulvert),
-    water: features.filter(isWater),
-    buildings: features.filter(isBuilding),
-    woods: features.filter(isWoodsFeature),
-    parks: features.filter((feature) => isParkOrWoodsFeature(feature) && !isWoodsFeature(feature)),
-    pullOffs: features.filter(isPullOffFeature),
-    barriers: features.filter(isBarrierOrGateFeature),
-    trailheads: features.filter(isTrailheadFeature),
-    industrial: features.filter(isIndustrialFeature),
-    trees: features.filter(isTreeFeature),
+  const context: SpatialContext = {
+    roads: [],
+    parking: [],
+    trails: [],
+    bridges: [],
+    water: [],
+    buildings: [],
+    woods: [],
+    parks: [],
+    pullOffs: [],
+    barriers: [],
+    trailheads: [],
+    industrial: [],
+    trees: [],
   };
+
+  for (const feature of features) {
+    const isWoods = isWoodsFeature(feature);
+
+    if (isRoadFeature(feature)) context.roads.push(feature);
+    if (isParking(feature)) context.parking.push(feature);
+    if (isTrailOrPath(feature)) context.trails.push(feature);
+    if (isBridgeOrCulvert(feature)) context.bridges.push(feature);
+    if (isWater(feature)) context.water.push(feature);
+    if (isBuilding(feature)) context.buildings.push(feature);
+    if (isWoods) context.woods.push(feature);
+    if (isParkOrWoodsFeature(feature) && !isWoods) context.parks.push(feature);
+    if (isPullOffFeature(feature)) context.pullOffs.push(feature);
+    if (isBarrierOrGateFeature(feature)) context.barriers.push(feature);
+    if (isTrailheadFeature(feature)) context.trailheads.push(feature);
+    if (isIndustrialFeature(feature)) context.industrial.push(feature);
+    if (isTreeFeature(feature)) context.trees.push(feature);
+  }
+
+  return context;
 }
 
 export function isLowSpeedRoad(tags: Record<string, string>): boolean {
@@ -1737,6 +1781,10 @@ function isWater(feature: GeoJSONFeature): boolean {
   return Boolean(tags.waterway) || tags.natural === "water" || Boolean(tags.water);
 }
 
+function isWaterArea(feature: GeoJSONFeature): feature is Feature<Polygon | MultiPolygon> & GeoJSONFeature {
+  return feature.geometry.type === "Polygon" || feature.geometry.type === "MultiPolygon";
+}
+
 function isBuilding(feature: GeoJSONFeature): boolean {
   const tags = getFeatureTags(feature);
   return Boolean(tags.building) && tags.building !== "no";
@@ -2062,6 +2110,9 @@ function distanceToLineishFeatureMeters(
 }
 
 function sampleFeatureCoordinates(feature: GeoJSONFeature, maxSamples: number): LatLng[] {
+  const cached = sampleCoordinateCache.get(feature)?.get(maxSamples);
+  if (cached) return cached;
+
   const positions = flattenPositions(feature.geometry).filter(
     (position) => Number.isFinite(position[0]) && Number.isFinite(position[1]),
   );
@@ -2070,7 +2121,7 @@ function sampleFeatureCoordinates(feature: GeoJSONFeature, maxSamples: number): 
   if (rep) samples.push(rep);
 
   if (positions.length === 0) {
-    return samples;
+    return cacheSampleFeatureCoordinates(feature, maxSamples, samples);
   }
 
   const step = Math.max(1, Math.floor(positions.length / Math.max(1, maxSamples - 1)));
@@ -2084,6 +2135,17 @@ function sampleFeatureCoordinates(feature: GeoJSONFeature, maxSamples: number): 
     samples.push({ lat: last[1], lng: last[0] });
   }
 
+  return cacheSampleFeatureCoordinates(feature, maxSamples, samples);
+}
+
+function cacheSampleFeatureCoordinates(
+  feature: GeoJSONFeature,
+  maxSamples: number,
+  samples: LatLng[],
+): LatLng[] {
+  const bySampleCount = sampleCoordinateCache.get(feature) ?? new Map<number, LatLng[]>();
+  bySampleCount.set(maxSamples, samples);
+  sampleCoordinateCache.set(feature, bySampleCount);
   return samples;
 }
 
@@ -2174,6 +2236,15 @@ export interface ClippedRoad {
   lengthMeters: number;
 }
 
+interface LocalizedWideWaterMatch {
+  feature: GeoJSONFeature;
+  source: GeoJSONFeature;
+  spans: number;
+  lengthMeters: number;
+  minWidthMeters: number;
+  maxWidthMeters: number;
+}
+
 function farFromAnyPredicate(
   features: GeoJSONFeature[],
   minMeters: number,
@@ -2261,6 +2332,215 @@ export function clipRoadToPredicate(
     spans: passingLines.length,
     lengthMeters: totalMeters,
   };
+}
+
+function localizedWideWaterMatches(
+  waterFeatures: GeoJSONFeature[],
+  searchBBox?: BBox,
+): LocalizedWideWaterMatch[] {
+  const publicWater = waterFeatures.filter(
+    (feature) => isWater(feature) && !isClearlyRestricted(feature),
+  );
+  const waterAreas = publicWater.filter(isWaterArea);
+  const matches: LocalizedWideWaterMatch[] = [];
+
+  for (const feature of publicWater) {
+    if (!isLineGeometry(feature.geometry)) continue;
+    const explicitWidthMeters = parseWaterWidthMeters(getFeatureTags(feature));
+    const widths: number[] = [];
+    const clipped = clipRoadToPredicate(
+      feature,
+      (sample) => {
+        if (searchBBox && !coordinateInBBox(sample, searchBBox)) return false;
+        const polygonWidthMeters = localWaterWidthMeters(sample, waterAreas);
+        const widthMeters = Math.max(polygonWidthMeters ?? 0, explicitWidthMeters ?? 0);
+        if (widthMeters > WIDE_WATER_MIN_WIDTH_METERS) {
+          widths.push(widthMeters);
+          return true;
+        }
+        return false;
+      },
+      WIDE_WATER_SAMPLE_STEP_METERS,
+    );
+    if (!clipped || widths.length === 0) continue;
+    matches.push({
+      feature: clipped.feature,
+      source: feature,
+      spans: clipped.spans,
+      lengthMeters: clipped.lengthMeters,
+      minWidthMeters: Math.min(...widths),
+      maxWidthMeters: Math.max(...widths),
+    });
+  }
+
+  for (const area of waterAreas) {
+    const match = localizedWideWaterAreaMatch(area, searchBBox);
+    if (match) matches.push(match);
+  }
+
+  return matches;
+}
+
+function localizedWideWaterAreaMatch(
+  area: GeoJSONFeature,
+  searchBBox?: BBox,
+): LocalizedWideWaterMatch | null {
+  const scanLines = scanLinesForWaterArea(area, searchBBox);
+  const passingLines: Position[][] = [];
+  const widths: number[] = [];
+
+  for (const scanLine of scanLines) {
+    const samples = sampleLineAtInterval(scanLine, WIDE_WATER_SAMPLE_STEP_METERS);
+    let currentRun: Position[] = [];
+
+    for (const sample of samples) {
+      const widthMeters = localWaterWidthMeters(sample, [area as Feature<Polygon | MultiPolygon> & GeoJSONFeature]);
+      if (widthMeters !== null && widthMeters > WIDE_WATER_MIN_WIDTH_METERS) {
+        currentRun.push([sample.lng, sample.lat]);
+        widths.push(widthMeters);
+      } else {
+        if (currentRun.length >= 2) passingLines.push(currentRun);
+        currentRun = [];
+      }
+    }
+
+    if (currentRun.length >= 2) passingLines.push(currentRun);
+  }
+
+  if (passingLines.length === 0 || widths.length === 0) return null;
+
+  const totalMeters = passingLines.reduce((sum, line) => sum + lineLengthMeters(line), 0);
+  const geometry: Geometry =
+    passingLines.length === 1
+      ? { type: "LineString", coordinates: passingLines[0] }
+      : { type: "MultiLineString", coordinates: passingLines };
+
+  return {
+    feature: {
+      ...area,
+      geometry,
+    },
+    source: area,
+    spans: passingLines.length,
+    lengthMeters: totalMeters,
+    minWidthMeters: Math.min(...widths),
+    maxWidthMeters: Math.max(...widths),
+  };
+}
+
+function localWaterWidthMeters(
+  sample: LatLng,
+  waterAreas: Array<Feature<Polygon | MultiPolygon> & GeoJSONFeature>,
+): number | null {
+  const pointFeature = point([sample.lng, sample.lat]);
+  let widestMeters: number | null = null;
+
+  for (const area of waterAreas) {
+    if (!booleanPointInPolygon(pointFeature, area)) continue;
+    const distanceToShoreMeters = distanceToPolygonBoundaryMeters(pointFeature, area.geometry);
+    const widthMeters = distanceToShoreMeters * 2;
+    widestMeters = widestMeters === null ? widthMeters : Math.max(widestMeters, widthMeters);
+  }
+
+  return widestMeters;
+}
+
+function scanLinesForWaterArea(feature: GeoJSONFeature, searchBBox?: BBox): Position[][] {
+  const bounds = clippedFeatureBounds(feature, searchBBox);
+  if (!bounds) return [];
+
+  const centerLat = (bounds.south + bounds.north) / 2;
+  const centerLng = (bounds.west + bounds.east) / 2;
+  const eastWestMeters = distance([bounds.west, centerLat], [bounds.east, centerLat], {
+    units: "kilometers",
+  }) * 1000;
+  const northSouthMeters = distance([centerLng, bounds.south], [centerLng, bounds.north], {
+    units: "kilometers",
+  }) * 1000;
+  const horizontal = eastWestMeters >= northSouthMeters;
+  const crossMeters = horizontal ? northSouthMeters : eastWestMeters;
+  if (crossMeters <= WIDE_WATER_MIN_WIDTH_METERS) return [];
+
+  const count = Math.max(
+    1,
+    Math.min(WIDE_WATER_SCANLINE_COUNT, Math.floor(crossMeters / WIDE_WATER_MIN_WIDTH_METERS)),
+  );
+  const lines: Position[][] = [];
+  for (let index = 0; index < count; index += 1) {
+    const t = (index + 0.5) / count;
+    if (horizontal) {
+      const lat = bounds.south + (bounds.north - bounds.south) * t;
+      lines.push([
+        [bounds.west, lat],
+        [bounds.east, lat],
+      ]);
+    } else {
+      const lng = bounds.west + (bounds.east - bounds.west) * t;
+      lines.push([
+        [lng, bounds.south],
+        [lng, bounds.north],
+      ]);
+    }
+  }
+  return lines;
+}
+
+function clippedFeatureBounds(feature: GeoJSONFeature, searchBBox?: BBox): BBox | null {
+  const positions = flattenPositions(feature.geometry).filter(
+    (position) => Number.isFinite(position[0]) && Number.isFinite(position[1]),
+  );
+  if (positions.length === 0) return null;
+
+  let west = Number.POSITIVE_INFINITY;
+  let east = Number.NEGATIVE_INFINITY;
+  let south = Number.POSITIVE_INFINITY;
+  let north = Number.NEGATIVE_INFINITY;
+  for (const [lng, lat] of positions) {
+    west = Math.min(west, lng);
+    east = Math.max(east, lng);
+    south = Math.min(south, lat);
+    north = Math.max(north, lat);
+  }
+
+  if (searchBBox) {
+    west = Math.max(west, searchBBox.west);
+    east = Math.min(east, searchBBox.east);
+    south = Math.max(south, searchBBox.south);
+    north = Math.min(north, searchBBox.north);
+  }
+
+  if (west >= east || south >= north) return null;
+  return { south, west, north, east };
+}
+
+function coordinateInBBox(coordinate: LatLng, bbox: BBox): boolean {
+  return (
+    coordinate.lat >= bbox.south &&
+    coordinate.lat <= bbox.north &&
+    coordinate.lng >= bbox.west &&
+    coordinate.lng <= bbox.east
+  );
+}
+
+function parseWaterWidthMeters(tags: Record<string, string>): number | null {
+  for (const key of ["width", "est_width"]) {
+    const parsed = parseMeters(tags[key]);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function parseMeters(value: string | undefined): number | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  const match = normalized.match(/(\d+(?:\.\d+)?)\s*(m|meter|meters|ft|feet|foot|')?/);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount)) return null;
+  const unit = match[2];
+  return unit === "ft" || unit === "feet" || unit === "foot" || unit === "'"
+    ? amount * 0.3048
+    : amount;
 }
 
 function lineLengthMeters(positions: Position[]): number {

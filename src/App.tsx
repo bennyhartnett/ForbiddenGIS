@@ -104,6 +104,7 @@ const PRESET_CATEGORIES: PresetCategory[] = [
       "preset-featured-camping",
       "preset-featured-hunting",
       "preset-featured-parking",
+      "preset-featured-wide-water",
     ]),
   },
 ];
@@ -216,7 +217,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
   const autocompleteServiceRef = useRef<google.maps.places.AutocompleteService | null>(null);
   const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
-  const overlayMapTypeRef = useRef<google.maps.MapType | null>(null);
+  const overlayMapTypeRef = useRef<google.maps.ImageMapType | null>(null);
+  const overlayOpacityRef = useRef(0.8);
   const abortRef = useRef<AbortController | null>(null);
   const lastRequestKeyRef = useRef<string | null>(null);
   const selectedDataFeatureRef = useRef<google.maps.Data.Feature | null>(null);
@@ -233,6 +235,15 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     presetMinZoom: 14,
   });
   const lastSearchCenterRef = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
+  const liveMapStateRef = useRef<{
+    zoom: number;
+    visibleDiagonalKm: number | null;
+    boundsWarning: string | null;
+  }>({
+    zoom: DEFAULT_ZOOM,
+    visibleDiagonalKm: null,
+    boundsWarning: null,
+  });
 
   // Search state
   const [mode, setMode] = useState<Mode>("preset");
@@ -317,6 +328,30 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     [overlayId],
   );
   const gibsActive = overlaySource.kind === "gibs";
+  const setSyncedZoom = useCallback((nextZoom: number) => {
+    if (liveMapStateRef.current.zoom !== nextZoom) {
+      liveMapStateRef.current.zoom = nextZoom;
+      setZoom(nextZoom);
+    }
+  }, []);
+  const setSyncedVisibleDiagonalKm = useCallback((nextDiagonalKm: number | null) => {
+    const current = liveMapStateRef.current.visibleDiagonalKm;
+    const changed =
+      current === null || nextDiagonalKm === null
+        ? current !== nextDiagonalKm
+        : Math.abs(current - nextDiagonalKm) > 0.01;
+
+    if (changed) {
+      liveMapStateRef.current.visibleDiagonalKm = nextDiagonalKm;
+      setVisibleDiagonalKm(nextDiagonalKm);
+    }
+  }, []);
+  const setSyncedBoundsWarning = useCallback((nextWarning: string | null) => {
+    if (liveMapStateRef.current.boundsWarning !== nextWarning) {
+      liveMapStateRef.current.boundsWarning = nextWarning;
+      setBoundsWarning(nextWarning);
+    }
+  }, []);
 
   const filteredPresets = useMemo(() => {
     const category = PRESET_CATEGORIES.find((c) => c.id === presetCategory) ?? PRESET_CATEGORIES[0];
@@ -376,12 +411,19 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
         mode,
         tagFilter,
         selectedPreset.minZoom,
-        setZoom,
-        setVisibleDiagonalKm,
-        setBoundsWarning,
+        setSyncedZoom,
+        setSyncedVisibleDiagonalKm,
+        setSyncedBoundsWarning,
       );
     }
-  }, [mode, selectedPreset.minZoom, tagFilter]);
+  }, [
+    mode,
+    selectedPreset.minZoom,
+    setSyncedBoundsWarning,
+    setSyncedVisibleDiagonalKm,
+    setSyncedZoom,
+    tagFilter,
+  ]);
 
   // Place autocomplete
   useEffect(() => {
@@ -476,12 +518,22 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       return;
     }
 
-    const overlayType = buildOverlayMapType(maps, overlaySource, gibsDate, overlayOpacity);
+    const overlayType = buildOverlayMapType(
+      maps,
+      overlaySource,
+      gibsDate,
+      overlayOpacityRef.current,
+    );
     if (overlayType) {
       map.overlayMapTypes.push(overlayType);
       overlayMapTypeRef.current = overlayType;
     }
-  }, [overlaySource, gibsDate, overlayOpacity]);
+  }, [overlaySource, gibsDate]);
+
+  useEffect(() => {
+    overlayOpacityRef.current = overlayOpacity;
+    overlayMapTypeRef.current?.setOpacity(overlayOpacity);
+  }, [overlayOpacity]);
 
   const clearDataLayer = useCallback(() => {
     const map = mapRef.current;
@@ -841,6 +893,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
                 includeBuildings: showBuildings,
                 includeWater: showWater,
                 renderLimit: RENDER_LIMIT,
+                searchBBox: bbox,
               })
             : prepareSimpleResult(overpassFeatures, {
                 includeBuildings: false,
@@ -1167,6 +1220,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   useEffect(() => {
     let cancelled = false;
     const listeners: google.maps.MapsEventListener[] = [];
+    const timeoutIds: number[] = [];
 
     async function setupMap() {
       try {
@@ -1230,9 +1284,9 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
             gate.mode,
             gate.tagFilter,
             gate.presetMinZoom,
-            setZoom,
-            setVisibleDiagonalKm,
-            setBoundsWarning,
+            setSyncedZoom,
+            setSyncedVisibleDiagonalKm,
+            setSyncedBoundsWarning,
           );
         };
 
@@ -1272,11 +1326,12 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
             maybeShowSearchHereChip();
             persistCurrentMapView();
           }),
-          map.addListener("bounds_changed", syncCurrentMapState),
         );
 
-        window.setTimeout(syncCurrentMapState, 250);
-        window.setTimeout(syncCurrentMapState, 1500);
+        timeoutIds.push(
+          window.setTimeout(syncCurrentMapState, 250),
+          window.setTimeout(syncCurrentMapState, 1500),
+        );
         setMapStatus("Map ready");
       } catch (mapError) {
         setMapStatus("Map failed to load.");
@@ -1288,9 +1343,10 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
 
     return () => {
       cancelled = true;
+      timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
       listeners.forEach((listener) => listener.remove());
     };
-  }, [apiKey]);
+  }, [apiKey, setSyncedBoundsWarning, setSyncedVisibleDiagonalKm, setSyncedZoom]);
 
   useEffect(() => {
     const maps = mapsRef.current;
@@ -1298,6 +1354,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     if (streetViewState.status !== "open" || !maps || !container) return;
     const location = streetViewState.data.location;
     if (!location?.pano || !location.latLng) return;
+
+    panoramaRef.current?.setVisible(false);
     panoramaRef.current = new maps.maps.StreetViewPanorama(container, {
       pano: location.pano,
       position: location.latLng,
@@ -1319,6 +1377,11 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
           )
         : -1,
     );
+
+    return () => {
+      panoramaRef.current?.setVisible(false);
+      panoramaRef.current = null;
+    };
   }, [streetViewState]);
 
   useEffect(() => {
@@ -1626,6 +1689,9 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
             matches={resultFeatures}
             selectedId={selectedFeature?.scoutId ?? null}
             streetViewAvailability={streetViewAvailability}
+            selectedFeature={selectedFeature}
+            resolvedAddress={resolvedAddress}
+            resolvingAddress={resolvingAddress}
             onSelect={focusMatch}
             onBack={() => setMatchListOpen(false)}
           />
@@ -2814,12 +2880,18 @@ function MatchListPanel({
   matches,
   selectedId,
   streetViewAvailability,
+  selectedFeature,
+  resolvedAddress,
+  resolvingAddress,
   onSelect,
   onBack,
 }: {
   matches: SelectedFeature[];
   selectedId: string | null;
   streetViewAvailability: Set<string>;
+  selectedFeature: SelectedFeature | null;
+  resolvedAddress: string | null;
+  resolvingAddress: boolean;
   onSelect: (match: SelectedFeature) => void;
   onBack: () => void;
 }) {
@@ -2854,6 +2926,10 @@ function MatchListPanel({
           const isSelected = match.scoutId === selectedId;
           const hasStreetView = streetViewAvailability.has(match.scoutId);
           const surfaceLabel = describeSurface(match.tags);
+          const displayName =
+            isSelected && selectedFeature?.scoutId === match.scoutId
+              ? pickFeatureDisplayName(selectedFeature, resolvedAddress, resolvingAddress)
+              : pickFeatureDisplayName(match, null, false);
           return (
             <li key={match.scoutId}>
               <button
@@ -2866,7 +2942,7 @@ function MatchListPanel({
                 <span className="match-list-index">{index + 1}</span>
                 <span className="match-list-body">
                   <span className="match-list-name">
-                    <span className="match-list-name-text">{match.name}</span>
+                    <span className="match-list-name-text">{displayName}</span>
                     {hasStreetView ? (
                       <span
                         className="match-list-streetview-badge"
@@ -3475,6 +3551,17 @@ function PresetGlyph({ presetId }: { presetId: PresetId }) {
           <path d="M9 7h4a3 3 0 0 1 0 6h-4" />
         </svg>
       );
+    case "preset-featured-wide-water":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 8c3-2 5-2 8 0s5 2 8 0" />
+          <path d="M3 14c3-2 5-2 8 0s5 2 8 0" />
+          <path d="M3 20c3-2 5-2 8 0s5 2 8 0" />
+          <path d="M12 4v16" />
+          <path d="M9 7l3-3 3 3" />
+          <path d="M9 17l3 3 3-3" />
+        </svg>
+      );
     case "preset-weather":
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -3506,7 +3593,7 @@ function buildOverlayMapType(
   overlay: (typeof OVERLAY_SOURCES)[number],
   date: string,
   opacity: number,
-): google.maps.MapType | null {
+): google.maps.ImageMapType | null {
   if (overlay.kind === "none") return null;
 
   const tileSize = new maps.maps.Size(256, 256);

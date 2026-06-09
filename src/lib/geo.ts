@@ -141,6 +141,7 @@ export type PresetId =
   | "preset-featured-camping"
   | "preset-featured-hunting"
   | "preset-featured-parking"
+  | "preset-featured-wide-water"
   | "preset-weather"
   | "preset-restricted"
   | "preset-private-parcels";
@@ -178,6 +179,26 @@ export interface PresetResult {
   capped: boolean;
   warnings: string[];
 }
+
+const featureTagCache = new WeakMap<GeoJSONFeature, Record<string, string>>();
+const representativeCoordinateCache = new WeakMap<GeoJSONFeature, LatLng>();
+const TAG_PROPERTY_EXCLUSIONS = new Set([
+  "id",
+  "type",
+  "relations",
+  "meta",
+  "tainted",
+  "scoutId",
+  "scoutRole",
+  "scoutCategory",
+  "scoutMatchReason",
+  "scoutMatchDetail",
+  "scoutMatchDistanceMeters",
+  "scoutMatchLengthMeters",
+  "scoutLat",
+  "scoutLng",
+  "scoutSelected",
+]);
 
 export function googleBoundsToBBox(bounds: google.maps.LatLngBounds): BBox {
   const southWest = bounds.getSouthWest();
@@ -225,6 +246,9 @@ export function featureBounds(feature: GeoJSONFeature): BBox | null {
 }
 
 export function representativeCoordinate(feature: GeoJSONFeature): LatLng | null {
+  const cached = representativeCoordinateCache.get(feature);
+  if (cached) return cached;
+
   const props = feature.properties;
 
   if (
@@ -233,14 +257,14 @@ export function representativeCoordinate(feature: GeoJSONFeature): LatLng | null
     Number.isFinite(props.scoutLat) &&
     Number.isFinite(props.scoutLng)
   ) {
-    return { lat: props.scoutLat, lng: props.scoutLng };
+    return cacheRepresentativeCoordinate(feature, { lat: props.scoutLat, lng: props.scoutLng });
   }
 
   try {
     const center = centroid(feature) as Feature<Point, GeoJsonProperties>;
     const [lng, lat] = center.geometry.coordinates;
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
-      return { lat, lng };
+      return cacheRepresentativeCoordinate(feature, { lat, lng });
     }
   } catch {
     // Fall through to coordinate traversal.
@@ -248,7 +272,7 @@ export function representativeCoordinate(feature: GeoJSONFeature): LatLng | null
 
   const fallback = firstCoordinate(feature.geometry);
   if (fallback && Number.isFinite(fallback[0]) && Number.isFinite(fallback[1])) {
-    return { lat: fallback[1], lng: fallback[0] };
+    return cacheRepresentativeCoordinate(feature, { lat: fallback[1], lng: fallback[0] });
   }
 
   return null;
@@ -288,43 +312,119 @@ export function attachScoutMetadata(
 }
 
 export function getFeatureTags(feature: GeoJSONFeature): Record<string, string> {
+  const cached = featureTagCache.get(feature);
+  if (cached) return cached;
+
   const props = feature.properties ?? {};
   const nestedTags = props.tags;
 
   if (nestedTags && typeof nestedTags === "object" && !Array.isArray(nestedTags)) {
-    return Object.fromEntries(
-      Object.entries(nestedTags).map(([key, value]) => [key, String(value)]),
+    return cacheFeatureTags(
+      feature,
+      Object.fromEntries(
+        Object.entries(nestedTags).map(([key, value]) => [key, String(value)]),
+      ),
     );
   }
 
-  const excluded = new Set([
-    "id",
-    "type",
-    "relations",
-    "meta",
-    "tainted",
-    "scoutId",
-    "scoutRole",
-    "scoutCategory",
-    "scoutMatchReason",
-    "scoutMatchDetail",
-    "scoutMatchDistanceMeters",
-    "scoutMatchLengthMeters",
-    "scoutLat",
-    "scoutLng",
-    "scoutSelected",
-  ]);
-
-  return Object.fromEntries(
-    Object.entries(props)
-      .filter(([key, value]) => !excluded.has(key) && typeof value !== "object")
-      .map(([key, value]) => [key, String(value)]),
+  return cacheFeatureTags(
+    feature,
+    Object.fromEntries(
+      Object.entries(props)
+        .filter(([key, value]) => !TAG_PROPERTY_EXCLUSIONS.has(key) && typeof value !== "object")
+        .map(([key, value]) => [key, String(value)]),
+    ),
   );
+}
+
+function cacheFeatureTags(
+  feature: GeoJSONFeature,
+  tags: Record<string, string>,
+): Record<string, string> {
+  featureTagCache.set(feature, tags);
+  return tags;
+}
+
+function cacheRepresentativeCoordinate(
+  feature: GeoJSONFeature,
+  coordinate: LatLng,
+): LatLng {
+  representativeCoordinateCache.set(feature, coordinate);
+  return coordinate;
+}
+
+const NAME_TAGS = [
+  "name",
+  "brand",
+  "operator",
+  "official_name",
+  "short_name",
+  "loc_name",
+  "alt_name",
+];
+
+const TYPE_NAME_TAGS = [
+  "amenity",
+  "shop",
+  "tourism",
+  "leisure",
+  "office",
+  "craft",
+  "historic",
+  "natural",
+  "landuse",
+  "building",
+  "highway",
+  "railway",
+  "waterway",
+  "aeroway",
+  "man_made",
+  "power",
+];
+
+function getTagDisplayName(tags: Record<string, string>): string | null {
+  for (const key of NAME_TAGS) {
+    const value = tags[key]?.trim();
+    if (value) return value;
+  }
+
+  const addressName = getAddressDisplayName(tags);
+  if (addressName) return addressName;
+
+  return getTypeDisplayName(tags);
+}
+
+function getAddressDisplayName(tags: Record<string, string>): string | null {
+  const fullAddress = tags["addr:full"]?.trim();
+  if (fullAddress) return fullAddress;
+
+  const street = tags["addr:street"]?.trim();
+  const housenumber = tags["addr:housenumber"]?.trim();
+  if (street && housenumber) return `${housenumber} ${street}`;
+  return street || null;
+}
+
+function getTypeDisplayName(tags: Record<string, string>): string | null {
+  for (const key of TYPE_NAME_TAGS) {
+    const value = tags[key]?.trim();
+    if (!value || value === "yes" || value === "no") continue;
+    const label = humanizeTagValue(value);
+    return key === "highway" ? `${label} road` : label;
+  }
+
+  if (tags.building === "yes") return "Building";
+  return null;
+}
+
+function humanizeTagValue(value: string): string {
+  const cleaned = value.replace(/[_;]+/g, " ").trim();
+  if (!cleaned) return value;
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
 }
 
 export function getFeatureName(feature: GeoJSONFeature): string {
   const tags = getFeatureTags(feature);
-  return tags.name || tags.brand || tags.operator || "Unnamed location";
+  return getTagDisplayName(tags) ?? "Unnamed location";
 }
 
 export function getOsmType(feature: GeoJSONFeature): string | undefined {
@@ -392,7 +492,7 @@ export function selectedFeatureFromProperties(
 
   return {
     scoutId,
-    name: tags.name || tags.brand || tags.operator || "Unnamed location",
+    name: getTagDisplayName(tags) ?? "Unnamed location",
     osmType: typeof properties.type === "string" ? properties.type : undefined,
     osmId:
       typeof properties.id === "string" || typeof properties.id === "number"

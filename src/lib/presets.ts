@@ -13,6 +13,7 @@ export const PRESETS: PresetDefinition[] = [
   preset("preset-featured-camping", "Camping Spots", "Campsites, caravan sites, camp pitches, and dispersed camping areas.", 12, false, false, false),
   preset("preset-featured-hunting", "Hunting Spots", "Hunting stands, game reserves, and tagged hunting areas with mapped access.", 12, false, false, false),
   preset("preset-featured-parking", "Public Parking", "Publicly accessible parking lots, laybys, and rest areas.", 14, false, false, false),
+  preset("preset-featured-wide-water", "Public Water >20 ft", "Public-ish rivers, canals, ponds, lakes, and reservoirs only where local mapped width is over 20 ft.", 15, true, false, false),
   preset("preset-dirt-roads", "Dirt & Gravel Roads", "Tracks with gravel, dirt, sand, grass, or graded unpaved surfaces drivable by a Jeep or similar 4x4.", 14, false, false, false),
   preset("preset-alleys", "Alleys & Service Lanes", "Back-lot alleys and service lanes threading between buildings.", 14, false, false, false),
   preset("preset-01", "Public Off-Road Routes", "Tracks and rough roads with no private or restricted access tags.", 14, true, true, false),
@@ -206,6 +207,8 @@ function presetClauses(
       return huntingClauses(boxes.bbox);
     case "preset-featured-parking":
       return [...parkingClauses(boxes.bbox), ...pullOffClauses(boxes.bbox)];
+    case "preset-featured-wide-water":
+      return publicWideWaterClauses(boxes.bbox);
     case "preset-weather":
       return weatherStationClauses(boxes.bbox);
     case "preset-restricted":
@@ -432,6 +435,16 @@ function waterClauses(bbox: string): string[] {
     `nwr["water"](${bbox});`,
     `way["waterway"~"^(river|stream|canal|ditch|drain)$"](${bbox});`,
     `way["natural"="coastline"](${bbox});`,
+  ];
+}
+
+function publicWideWaterClauses(bbox: string): string[] {
+  const publicAccess = `^(private|no|customers|permit)$`;
+  return [
+    `nwr["natural"="water"]["access"!~"${publicAccess}"](${bbox});`,
+    `nwr["water"]["access"!~"${publicAccess}"](${bbox});`,
+    `nwr["waterway"="riverbank"]["access"!~"${publicAccess}"](${bbox});`,
+    `way["waterway"~"^(river|stream|canal)$"]["access"!~"${publicAccess}"](${bbox});`,
   ];
 }
 
