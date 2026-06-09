@@ -5,6 +5,7 @@ export interface PresetQueryOptions {
   includeBuildings: boolean;
   includeWater: boolean;
   bufferScale?: number;
+  isolationDistanceMeters?: number;
 }
 
 export const PRESETS: PresetDefinition[] = [
@@ -14,6 +15,8 @@ export const PRESETS: PresetDefinition[] = [
   preset("preset-featured-hunting", "Hunting Spots", "Hunting stands, game reserves, and tagged hunting areas with mapped access.", 12, false, false, false),
   preset("preset-featured-parking", "Public Parking", "Publicly accessible parking lots, laybys, and rest areas.", 14, false, false, false),
   preset("preset-featured-wide-water", "Public Water >20 ft", "Public-ish rivers, canals, ponds, lakes, and reservoirs only where local mapped width is over 20 ft.", 15, true, false, false),
+  preset("preset-featured-remote-road-trail", "Remote from Roads & Trails", "Generated map cells at least the selected distance from every mapped road or trail.", 12, true, false, false),
+  preset("preset-featured-remote-buildings", "Remote from Buildings", "Generated map cells at least the selected distance from every mapped building.", 12, true, false, false),
   preset("preset-dirt-roads", "Dirt & Gravel Roads", "Tracks with gravel, dirt, sand, grass, or graded unpaved surfaces drivable by a Jeep or similar 4x4.", 14, false, false, false),
   preset("preset-alleys", "Alleys & Service Lanes", "Back-lot alleys and service lanes threading between buildings.", 14, false, false, false),
   preset("preset-01", "Public Off-Road Routes", "Tracks and rough roads with no private or restricted access tags.", 14, true, true, false),
@@ -75,6 +78,9 @@ export function buildPresetOverpassQuery(
     bbox100ft: bboxToOverpass(expandBBox(bbox, 30.48 * scale)),
     bbox60m: bboxToOverpass(expandBBox(bbox, 60 * scale)),
     bbox100m: bboxToOverpass(expandBBox(bbox, 100 * scale)),
+    bboxIsolation: bboxToOverpass(
+      expandBBox(bbox, clampIsolationDistanceMeters(options.isolationDistanceMeters)),
+    ),
   };
   const clauses = presetClauses(presetDefinition.id, boxes);
 
@@ -109,7 +115,13 @@ function preset(
 
 function presetClauses(
   presetId: PresetId,
-  boxes: { bbox: string; bbox100ft: string; bbox60m: string; bbox100m: string },
+  boxes: {
+    bbox: string;
+    bbox100ft: string;
+    bbox60m: string;
+    bbox100m: string;
+    bboxIsolation: string;
+  },
 ): string[] {
   switch (presetId) {
     case "preset-dirt-roads":
@@ -209,6 +221,10 @@ function presetClauses(
       return [...parkingClauses(boxes.bbox), ...pullOffClauses(boxes.bbox)];
     case "preset-featured-wide-water":
       return publicWideWaterClauses(boxes.bbox);
+    case "preset-featured-remote-road-trail":
+      return [...roadClauses(boxes.bboxIsolation), ...trailClauses(boxes.bboxIsolation)];
+    case "preset-featured-remote-buildings":
+      return buildingClauses(boxes.bboxIsolation);
     case "preset-weather":
       return weatherStationClauses(boxes.bbox);
     case "preset-restricted":
@@ -532,4 +548,10 @@ function expandBBox(bbox: BBox, meters: number): BBox {
     north: bbox.north + latDelta,
     east: bbox.east + lngDelta,
   };
+}
+
+function clampIsolationDistanceMeters(value: number | undefined): number {
+  const defaultMeters = 0.5 * 1609.344;
+  if (value === undefined || !Number.isFinite(value)) return defaultMeters;
+  return Math.max(defaultMeters, Math.min(10 * 1609.344, value));
 }

@@ -38,6 +38,7 @@ export interface SpatialFilterOptions {
   renderLimit: number;
   simpleMatchLabel?: string;
   searchBBox?: BBox;
+  isolationDistanceMeters?: number;
 }
 
 export const NO_BUILDINGS_DISTANCE_METERS = 30.48;
@@ -55,8 +56,12 @@ export const TREE_LINED_REQUIRED_METERS = 30.48;
 export const TREE_CONTEXT_DISTANCE_METERS = 15;
 export const OFF_ROAD_MIN_LENGTH_METERS = 30.48;
 export const WIDE_WATER_MIN_WIDTH_METERS = 6.096;
+export const DEFAULT_REMOTE_AREA_DISTANCE_METERS = 0.5 * 1609.344;
+export const MAX_REMOTE_AREA_DISTANCE_METERS = 10 * 1609.344;
 const WIDE_WATER_SAMPLE_STEP_METERS = 5;
 const WIDE_WATER_SCANLINE_COUNT = 9;
+const REMOTE_AREA_MIN_CELL_METERS = 250;
+const REMOTE_AREA_MAX_CELL_METERS = 805;
 
 const PRIVATE_VALUES = new Set(["private", "no", "customers", "permit"]);
 const RESTRICTED_VALUES = new Set(["private", "no", "customers", "permit", "destination"]);
@@ -1203,6 +1208,45 @@ export function applyPresetSpatialFilters(
       }
       break;
 
+    case "preset-featured-remote-road-trail": {
+      const minDistanceMeters = normalizedRemoteAreaDistanceMeters(options.isolationDistanceMeters);
+      const blockers = dedupeFeatures([...context.roads, ...context.trails]);
+      for (const match of remoteAreaMatches(
+        options.searchBBox,
+        blockers,
+        minDistanceMeters,
+        "road-trail",
+      )) {
+        addResult(
+          match.feature,
+          "remote-area",
+          `More than ${formatMiles(minDistanceMeters)} from any road or trail`,
+          finiteDistance(match.nearestDistanceMeters),
+          remoteAreaDetail(match.nearestDistanceMeters, minDistanceMeters, "road or trail"),
+        );
+      }
+      break;
+    }
+
+    case "preset-featured-remote-buildings": {
+      const minDistanceMeters = normalizedRemoteAreaDistanceMeters(options.isolationDistanceMeters);
+      for (const match of remoteAreaMatches(
+        options.searchBBox,
+        context.buildings,
+        minDistanceMeters,
+        "building",
+      )) {
+        addResult(
+          match.feature,
+          "remote-area",
+          `More than ${formatMiles(minDistanceMeters)} from any building`,
+          finiteDistance(match.nearestDistanceMeters),
+          remoteAreaDetail(match.nearestDistanceMeters, minDistanceMeters, "building"),
+        );
+      }
+      break;
+    }
+
     case "preset-weather":
       for (const feature of features) {
         const tags = getFeatureTags(feature);
@@ -2245,6 +2289,11 @@ interface LocalizedWideWaterMatch {
   maxWidthMeters: number;
 }
 
+interface RemoteAreaMatch {
+  feature: GeoJSONFeature;
+  nearestDistanceMeters: number;
+}
+
 function farFromAnyPredicate(
   features: GeoJSONFeature[],
   minMeters: number,
@@ -2379,6 +2428,136 @@ function localizedWideWaterMatches(
   }
 
   return matches;
+}
+
+function remoteAreaMatches(
+  bbox: BBox | undefined,
+  blockers: GeoJSONFeature[],
+  minDistanceMeters: number,
+  kind: "road-trail" | "building",
+): RemoteAreaMatch[] {
+  if (!bbox) return [];
+
+  const cellMeters = remoteAreaCellMeters(minDistanceMeters);
+  const latStep = metersToLatDegrees(cellMeters);
+  if (latStep <= 0) return [];
+
+  const matches: RemoteAreaMatch[] = [];
+  let index = 0;
+
+  for (const lat of gridAxisCenters(bbox.south, bbox.north, latStep)) {
+    const lngStep = metersToLngDegrees(cellMeters, lat);
+    if (lngStep <= 0) continue;
+
+    for (const lng of gridAxisCenters(bbox.west, bbox.east, lngStep)) {
+      const sample = { lat, lng };
+      const nearest = nearestDistanceToFeatures(sample, blockers, minDistanceMeters);
+      if (nearest.distanceMeters <= minDistanceMeters) continue;
+
+      index += 1;
+      matches.push({
+        feature: remoteAreaCellFeature(
+          bbox,
+          sample,
+          cellMeters,
+          kind,
+          index,
+          minDistanceMeters,
+          nearest.distanceMeters,
+        ),
+        nearestDistanceMeters: nearest.distanceMeters,
+      });
+    }
+  }
+
+  return matches;
+}
+
+function gridAxisCenters(min: number, max: number, step: number): number[] {
+  if (max <= min || step <= 0) return [];
+  if (max - min <= step) return [(min + max) / 2];
+
+  const centers: number[] = [];
+  for (let value = min + step / 2; value < max; value += step) {
+    centers.push(value);
+  }
+  return centers;
+}
+
+function remoteAreaCellFeature(
+  bbox: BBox,
+  center: LatLng,
+  cellMeters: number,
+  kind: "road-trail" | "building",
+  index: number,
+  minDistanceMeters: number,
+  nearestDistanceMeters: number,
+): GeoJSONFeature {
+  const halfLat = metersToLatDegrees(cellMeters / 2);
+  const halfLng = metersToLngDegrees(cellMeters / 2, center.lat);
+  const south = Math.max(bbox.south, center.lat - halfLat);
+  const north = Math.min(bbox.north, center.lat + halfLat);
+  const west = Math.max(bbox.west, center.lng - halfLng);
+  const east = Math.min(bbox.east, center.lng + halfLng);
+  const blockerLabel = kind === "road-trail" ? "roads/trails" : "buildings";
+
+  return {
+    type: "Feature",
+    geometry: {
+      type: "Polygon",
+      coordinates: [[
+        [west, south],
+        [east, south],
+        [east, north],
+        [west, north],
+        [west, south],
+      ]],
+    },
+    properties: {
+      id: `remote-${kind}-${index}`,
+      type: "synthetic",
+      tags: {
+        name: `Remote from ${blockerLabel}`,
+        generated: "remote_area",
+        remote_filter: kind,
+        threshold: formatMiles(minDistanceMeters),
+        nearest: Number.isFinite(nearestDistanceMeters)
+          ? formatMiles(nearestDistanceMeters)
+          : `>${formatMiles(minDistanceMeters)}`,
+      },
+    },
+  };
+}
+
+function remoteAreaCellMeters(minDistanceMeters: number): number {
+  return Math.max(
+    REMOTE_AREA_MIN_CELL_METERS,
+    Math.min(REMOTE_AREA_MAX_CELL_METERS, minDistanceMeters / 3),
+  );
+}
+
+function normalizedRemoteAreaDistanceMeters(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return DEFAULT_REMOTE_AREA_DISTANCE_METERS;
+  return Math.max(DEFAULT_REMOTE_AREA_DISTANCE_METERS, Math.min(MAX_REMOTE_AREA_DISTANCE_METERS, value));
+}
+
+function remoteAreaDetail(
+  nearestDistanceMeters: number,
+  minDistanceMeters: number,
+  blockerLabel: string,
+): string {
+  if (!Number.isFinite(nearestDistanceMeters)) {
+    return `No mapped ${blockerLabel} found within ${formatMiles(minDistanceMeters)} of this cell.`;
+  }
+  return `Nearest mapped ${blockerLabel}: ${formatMiles(nearestDistanceMeters)}. Threshold: ${formatMiles(minDistanceMeters)}.`;
+}
+
+function metersToLatDegrees(meters: number): number {
+  return meters / 111_320;
+}
+
+function metersToLngDegrees(meters: number, latitude: number): number {
+  return meters / (111_320 * Math.max(Math.cos((latitude * Math.PI) / 180), 0.01));
 }
 
 function localizedWideWaterAreaMatch(
@@ -2560,6 +2739,11 @@ function formatMeters(distanceMeters: number): string {
     return `none within ${NO_BUILDINGS_DISTANCE_METERS.toFixed(1)} m`;
   }
   return distanceMeters < 10 ? `${distanceMeters.toFixed(1)} m` : `${Math.round(distanceMeters)} m`;
+}
+
+function formatMiles(distanceMeters: number): string {
+  const miles = distanceMeters / 1609.344;
+  return `${miles.toFixed(miles < 10 ? 1 : 0)} mi`;
 }
 
 function tagDetail(tags: Record<string, string>, keys: string[]): string {

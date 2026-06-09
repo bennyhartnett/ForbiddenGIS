@@ -105,9 +105,20 @@ const PRESET_CATEGORIES: PresetCategory[] = [
       "preset-featured-hunting",
       "preset-featured-parking",
       "preset-featured-wide-water",
+      "preset-featured-remote-road-trail",
+      "preset-featured-remote-buildings",
     ]),
   },
 ];
+
+const REMOTE_FILTER_PRESETS = new Set<PresetId>([
+  "preset-featured-remote-road-trail",
+  "preset-featured-remote-buildings",
+]);
+const DEFAULT_REMOTE_FILTER_MILES = 0.5;
+const MAX_REMOTE_FILTER_MILES = 10;
+const REMOTE_FILTER_STEP_MILES = 0.5;
+const METERS_PER_MILE = 1609.344;
 
 const SIMPLE_PRESETS = [
   { label: "Restaurants", filter: "amenity=restaurant" },
@@ -255,6 +266,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const [showBuildings, setShowBuildings] = useState(false);
   const [showWater, setShowWater] = useState(true);
   const [bufferScale, setBufferScale] = useState(1);
+  const [remoteRoadTrailMiles, setRemoteRoadTrailMiles] = useState(DEFAULT_REMOTE_FILTER_MILES);
+  const [remoteBuildingMiles, setRemoteBuildingMiles] = useState(DEFAULT_REMOTE_FILTER_MILES);
 
   // Location
   const [locationQuery, setLocationQuery] = useState(DEFAULT_LOCATION_QUERY);
@@ -322,6 +335,29 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
   const streetViewResizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const selectedPreset = useMemo(() => getPresetById(presetId), [presetId]);
+  const remoteFilterMiles =
+    presetId === "preset-featured-remote-road-trail"
+      ? remoteRoadTrailMiles
+      : presetId === "preset-featured-remote-buildings"
+        ? remoteBuildingMiles
+        : null;
+  const remoteFilterLabel =
+    presetId === "preset-featured-remote-road-trail"
+      ? "Road/trail distance"
+      : presetId === "preset-featured-remote-buildings"
+        ? "Building distance"
+        : null;
+  const handleRemoteFilterMilesChange = useCallback(
+    (value: number) => {
+      const normalized = normalizeRemoteFilterMiles(value);
+      if (presetId === "preset-featured-remote-road-trail") {
+        setRemoteRoadTrailMiles(normalized);
+      } else if (presetId === "preset-featured-remote-buildings") {
+        setRemoteBuildingMiles(normalized);
+      }
+    },
+    [presetId],
+  );
   const activeWarning = searchWarning ?? boundsWarning;
   const overlaySource = useMemo(
     () => OVERLAY_SOURCES.find((source) => source.id === overlayId) ?? OVERLAY_SOURCES[0],
@@ -797,6 +833,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       includeBuildings: showBuildings,
       includeWater: showWater,
       bufferScale,
+      isolationDistanceMeters:
+        remoteFilterMiles === null ? undefined : remoteFilterMiles * METERS_PER_MILE,
     };
 
     try {
@@ -826,6 +864,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
       String(showBuildings),
       String(showWater),
       String(bufferScale),
+      remoteFilterMiles === null ? "" : remoteFilterMiles.toFixed(1),
     ].join("|");
 
     if (loading && lastRequestKeyRef.current === requestKey) {
@@ -894,6 +933,8 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
                 includeWater: showWater,
                 renderLimit: RENDER_LIMIT,
                 searchBBox: bbox,
+                isolationDistanceMeters:
+                  remoteFilterMiles === null ? undefined : remoteFilterMiles * METERS_PER_MILE,
               })
             : prepareSimpleResult(overpassFeatures, {
                 includeBuildings: false,
@@ -942,6 +983,7 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
     mode,
     renderFeatures,
     rawQuery,
+    remoteFilterMiles,
     selectedPreset,
     showBuildings,
     showWater,
@@ -1609,6 +1651,9 @@ function ScoutApp({ apiKey }: { apiKey: string }) {
             searchOutcome={searchOutcome}
             hasMatches={resultFeatures.length > 0}
             onShowMatches={() => setMatchListOpen(true)}
+            remoteFilterMiles={remoteFilterMiles}
+            remoteFilterLabel={remoteFilterLabel}
+            onRemoteFilterMilesChange={handleRemoteFilterMilesChange}
           />
         )}
 
@@ -2020,6 +2065,9 @@ function PresetPanel(props: {
   searchOutcome: "idle" | "success" | "error";
   hasMatches: boolean;
   onShowMatches: () => void;
+  remoteFilterMiles: number | null;
+  remoteFilterLabel: string | null;
+  onRemoteFilterMilesChange: (value: number) => void;
 }) {
   return (
     <aside className={`panel preset-panel ${props.open ? "" : "collapsed"}`} aria-label="I'm Looking For">
@@ -2104,6 +2152,32 @@ function PresetPanel(props: {
           </div>
         </div>
 
+        {props.remoteFilterMiles !== null && props.remoteFilterLabel ? (
+          <div className="panel-section preset-tuner">
+            <div className="tuner-row">
+              <label>
+                {props.remoteFilterLabel}
+                <strong>{formatMilesForUi(props.remoteFilterMiles)}</strong>
+              </label>
+              <input
+                type="range"
+                min={DEFAULT_REMOTE_FILTER_MILES}
+                max={MAX_REMOTE_FILTER_MILES}
+                step={REMOTE_FILTER_STEP_MILES}
+                value={props.remoteFilterMiles}
+                onChange={(event) =>
+                  props.onRemoteFilterMilesChange(Number(event.target.value))
+                }
+                aria-label={props.remoteFilterLabel}
+              />
+            </div>
+            <p className="search-suggestion-status" style={{ padding: 0 }}>
+              Searches expand beyond the visible map by this distance, then shade visible cells
+              that pass the cutoff.
+            </p>
+          </div>
+        ) : null}
+
       </div>
 
       <div className="panel-footer">
@@ -2172,6 +2246,16 @@ function FloatingExport(props: {
 
 function formatSeconds(ms: number) {
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function normalizeRemoteFilterMiles(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_REMOTE_FILTER_MILES;
+  const stepped = Math.round(value / REMOTE_FILTER_STEP_MILES) * REMOTE_FILTER_STEP_MILES;
+  return Math.max(DEFAULT_REMOTE_FILTER_MILES, Math.min(MAX_REMOTE_FILTER_MILES, stepped));
+}
+
+function formatMilesForUi(miles: number): string {
+  return `${miles.toFixed(miles % 1 === 0 ? 0 : 1)} mi`;
 }
 
 function SearchStatusBanner(props: {
@@ -3562,6 +3646,24 @@ function PresetGlyph({ presetId }: { presetId: PresetId }) {
           <path d="M9 17l3 3 3-3" />
         </svg>
       );
+    case "preset-featured-remote-road-trail":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="7" />
+          <path d="M4 20c4-6 12-6 16 0" />
+          <path d="M8 4l8 16" />
+          <path d="M5 12h14" />
+        </svg>
+      );
+    case "preset-featured-remote-buildings":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="7" />
+          <path d="M9 9h6v9H9z" />
+          <path d="M11 18v-3h2v3" />
+          <path d="M8 4l8 16" />
+        </svg>
+      );
     case "preset-weather":
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -3993,7 +4095,8 @@ function estimatePresetLevel(
     presetId === "preset-11" ||
     presetId === "preset-27" ||
     presetId === "preset-28" ||
-    presetId === "preset-31"
+    presetId === "preset-31" ||
+    REMOTE_FILTER_PRESETS.has(presetId)
   ) {
     if (visibleDiagonalKm > 2.5) return "very-high";
     if (visibleDiagonalKm > 1.2) return "high";
@@ -4184,7 +4287,8 @@ function styleForDataFeature(
     category === "water" ||
     category === "parking" ||
     category === "restricted" ||
-    category === "private-parcel";
+    category === "private-parcel" ||
+    category === "remote-area";
 
   const isRestricted = category === "restricted" || category === "private-parcel";
 

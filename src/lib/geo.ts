@@ -62,7 +62,8 @@ export type ScoutCategory =
   | "railway"
   | "weather-station"
   | "restricted"
-  | "private-parcel";
+  | "private-parcel"
+  | "remote-area";
 
 export interface ScoutFeatureProperties {
   [key: string]: unknown;
@@ -142,6 +143,8 @@ export type PresetId =
   | "preset-featured-hunting"
   | "preset-featured-parking"
   | "preset-featured-wide-water"
+  | "preset-featured-remote-road-trail"
+  | "preset-featured-remote-buildings"
   | "preset-weather"
   | "preset-restricted"
   | "preset-private-parcels";
